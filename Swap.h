@@ -62,6 +62,7 @@ public:
 
 
     bool search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task);
+    bool bi_search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task);
 
     /*!
      * @details swap task j and task b
@@ -73,6 +74,7 @@ public:
      * @return
      */
     bool considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &C, int i,int u);
+    bool bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &C, int i,int u);
 
     void move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp);
 

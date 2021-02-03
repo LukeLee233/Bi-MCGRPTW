@@ -857,7 +857,8 @@ bool NewTwoOpt::before(const int a,const int b, HighSpeedNeighBorSearch &ns){
 }
 
 
-bool NewTwoOpt::search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task){
+bool NewTwoOpt::search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task)
+{
     My_Assert(chosen_task >= 1 && chosen_task <= mcgrp.actual_task_num,"Wrong task");
 
     flip_times = 0;
@@ -1053,7 +1054,8 @@ bool NewTwoOpt::search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chos
 }
 
 
-bool NewTwoOpt::considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int a, int b, int c, int d){
+bool NewTwoOpt::considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int a, int b, int c, int d)
+{
     // A easy prediction for overlapping
     if ((a == c) || (a == d) || (b == c) || (b == d)) {
         return false;
@@ -1196,4 +1198,186 @@ void NewTwoOpt::unit_test(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp)
     ns.policy.set(original_policy);
     ns.policy.beta = 0;
     ns.policy.tolerance = 0;
+}
+
+bool NewTwoOpt::bi_search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task)
+{
+    My_Assert(chosen_task >= 1 && chosen_task <= mcgrp.actual_task_num,"Wrong task");
+
+    ns.create_search_neighborhood(mcgrp, chosen_task);
+
+    int b = chosen_task;
+    int a = ns.solution[b]->pre->ID;
+    int c = ns.solution[b]->next->ID;
+
+    for(auto neighbor_task : ns.search_space){
+        My_Assert(neighbor_task != b,"Neighbor task can't be itself at all!");
+
+        if(neighbor_task != DUMMY){
+            //j can't be dummy and b can't be dummy neither here
+            int j = neighbor_task;
+            My_Assert(j >= 1 && j <= mcgrp.actual_task_num,"Wrong task");
+
+            int i = ns.solution[j]->pre->ID;
+            int k = ns.solution[j]->next->ID;
+
+            //total having four cases:
+            //(a,b)<->(i,j)
+            //(a,b)<->(j,k)
+            //(b,c)<->(i,j)
+            //(b,c)<->(j,k)
+            if (bi_considerable_move(ns,mcgrp, a, b, i, j)){
+                move(ns,mcgrp);
+                return true;
+            }
+
+            if (bi_considerable_move(ns,mcgrp, a, b, j, k)){
+                move(ns,mcgrp);
+                return true;
+            }
+
+            if (bi_considerable_move(ns, mcgrp, b, c, i, j)){
+                move(ns,mcgrp);
+                return true;
+            }
+
+            if (bi_considerable_move(ns,mcgrp, b, c, j, k)){
+                move(ns,mcgrp);
+                return true;
+            }
+        }
+        else{
+            DEBUG_PRINT("Neighbor task is dummy task");
+            //j is dummy here and b can't be dummy neither
+            //each start and end location of each route will be considered
+            //total 4 x route_nums cases
+            int current_start = ns.solution.very_start->next->ID;
+
+            while (current_start != DUMMY){
+                // Consider the start location
+                int j = current_start;
+                My_Assert(ns.solution[j]->pre->ID < 0,"Wrong task");
+
+                //case: (a,b)<->(dummy,j)
+                if (bi_considerable_move(ns, mcgrp, a, b, ns.solution[j]->pre->ID, j)){
+                    move(ns,mcgrp);
+                    return true;
+                }
+
+                //case: (b,c)<->(dummy,j)
+                if (bi_considerable_move(ns, mcgrp, b, c, ns.solution[j]->pre->ID, j)){
+                    move(ns,mcgrp);
+                    return true;
+                }
+
+                // Consider the end location
+                int current_route = ns.solution[current_start]->route_id;
+                int current_end = ns.routes[current_route]->end;
+                j = current_end;
+
+                My_Assert(ns.solution[j]->next->ID < 0,"Wrong task");
+
+                //case: (a,b)<->(j,dummy)
+                if (bi_considerable_move(ns, mcgrp, a, b, j, ns.solution[j]->next->ID)){
+                    move(ns,mcgrp);
+                    return true;
+                }
+
+                //case: (b,c)<->(j,dummy)
+                if (bi_considerable_move(ns, mcgrp, b, c, j, ns.solution[j]->next->ID)){
+                    move(ns,mcgrp);
+                    return true;
+                }
+
+                // advance to next route
+                current_start = ns.solution[current_end]->next->next->ID;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool NewTwoOpt::bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int a, int b, int c, int d)
+{
+    // A easy prediction for overlapping
+    if ((a == c) || (a == d) || (b == c) || (b == d)) {
+        return false;
+    }
+
+
+    int a_route, c_route;
+
+    if (a > 0)
+        a_route = ns.solution[a]->route_id;
+    else
+    {
+        My_Assert(b > 0,"task A is dummy and task B is dummy too? Come on! ");
+        a_route = ns.solution[b]->route_id;
+    }
+
+
+    if (c > 0)
+        c_route = ns.solution[c]->route_id;
+    else
+    {
+        My_Assert(d > 0,"task C is dummy and task D is dummy too? Come on! ");
+        c_route = ns.solution[d]->route_id;
+    }
+
+
+    if (a_route == c_route) {   //This is flip operation
+        //Definitely feasible
+        // same route: the 2opt move here corresponds to reversing the sequence of
+        // the sub route that is between (a|b) and (c|d), open interval
+        DEBUG_PRINT("Flip operator in 2-opt");
+        flip_times++;
+
+        if(before(a, c, ns)){      //...ab...cd...
+            if(flip.bi_considerable_move(ns, mcgrp, a, d)){
+                move_result = flip.move_result;
+                return true;
+            }
+            else{
+                move_result.reset();
+                move_result.move_type = NeighborOperator::TWO_OPT;
+                return false;
+            }
+        }
+        else{        //...cd...ab...
+            if(flip.bi_considerable_move(ns,mcgrp,c,b)){
+                move_result = flip.move_result;
+                return true;
+            }
+            else{
+                move_result.reset();
+                move_result.move_type = NeighborOperator::TWO_OPT;
+                return false;
+            }
+        }
+    }
+    else //This is SwapEnds operation
+    {
+        //Cross routes, feasibility need checked
+        //different routes: the 2opt move here corresponds to swap the sequence of
+        // the sub route that is after a and c, open interval
+
+        /// Example: ( a & v input): DEPOT-i-a-b-j-k-l-DEPOT and DEPOT-t-u-v-w-x-y-z-DEPOT becomes
+        /// DEPOT-i-a-w-x-y-z-DEPOT and DEPOT-t-u-v-b-j-k-l-DEPOT
+        DEBUG_PRINT("SwapEnds operator in 2-opt");
+        swapends_times++;
+
+        if(swap_ends.bi_considerable_move(ns, mcgrp, a, c, a_route, c_route)){
+            move_result = swap_ends.move_result;
+            return true;
+        }
+        else{
+            move_result.reset();
+            move_result.move_type = NeighborOperator::TWO_OPT;
+            return false;
+        }
+
+    }
+
+    My_Assert(false,"Can't reach here!");
 }

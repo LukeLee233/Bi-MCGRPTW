@@ -212,36 +212,7 @@ public:
 
 class HighSpeedNeighBorSearch
 {
-    friend class Memetic;
-    friend class SingleInsert;
-    friend class DoubleInsert;
-    friend class NewSwap;
-    friend class Swap;
-    friend class TwoOpt;
-    friend class NewTwoOpt;
-    friend class Presert;
-    friend class Postsert;
-    friend class MoveString;
-    friend class PreMoveString;
-    friend class PostMoveString;
-    friend class Slice;
-    friend class Preslice;
-    friend class Postslice;
-    friend class Extraction;
-    friend class Invert;
-    friend class NewFlip;
-    friend class Flip;
-    friend class NewSwapEnds;
-    friend class SwapEnds;
-    friend class Policy;
-
-    friend void merge_split(NeighBorSearch &ns, const MCGRP &mcgrp, const int merge_size,const int pseudo_capacity);
-    friend void merge_split(class HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, const int merge_size, const int pseudo_capacity);
-    friend struct RouteSegment get_segment_info(const MCGRP &mcgrp,const NeighBorSearch &ns,const int a,const int b);
-    friend struct RouteSegment get_segment_info(const MCGRP &mcgrp,HighSpeedNeighBorSearch &ns,const int chosen_task);
-    friend struct seg_info get_seg_info(const MCGRP &mcgrp, HighSpeedNeighBorSearch &ns, const int start_task, const int end_task);
-
-private:
+public:
 
     struct TASK_NODE{
         int ID;
@@ -498,7 +469,7 @@ private:
     unique_ptr<class NewTwoOpt> two_opt;
     unique_ptr<class Extraction> extraction;
     unique_ptr<class Slice> slice;
-public:
+
 
     HighSpeedNeighBorSearch(const MCGRP &mcgrp);
     ~HighSpeedNeighBorSearch();
@@ -575,6 +546,8 @@ public:
      */
     void threshold_exploration_version_0(const MCGRP &mcgrp);
     void threshold_exploration_version_1(const MCGRP &mcgrp);
+
+    double get_balance();
 
     /*!
      * @details descent exploration

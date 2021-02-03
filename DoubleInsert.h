@@ -68,6 +68,8 @@ public:
 
     bool search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task);
 
+    bool bi_search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task);
+
     /*!
      * @details double sert from disturbance_seq to candidate_task
      * @param ns
@@ -82,6 +84,12 @@ public:
                                   const MCGRP &mcgrp,
                                   vector<int> disturbance_seq,
                                   const int j);
+
+    bool bi_considerable_move(HighSpeedNeighBorSearch &ns,
+                           const MCGRP &mcgrp,
+                           vector<int> disturbance_seq,
+                           const int j);
+
 
     void move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp);
 

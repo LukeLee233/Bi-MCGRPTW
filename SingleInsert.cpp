@@ -5,6 +5,10 @@
 #include <vector>
 #include <algorithm>
 
+
+
+
+
 using namespace std;
 
 bool SingleInsert::search(NeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task)
@@ -588,4 +592,128 @@ void SingleInsert::unit_test(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp)
     ns.policy.beta = 0;
     ns.policy.tolerance = 0;
 }
+
+bool SingleInsert::bi_search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task)
+{
+    My_Assert(chosen_task >= 1 && chosen_task <= mcgrp.actual_task_num,"Wrong task");
+
+    ns.create_search_neighborhood(mcgrp, chosen_task);
+
+    int b = chosen_task;
+
+
+    for(auto neighbor_task : ns.search_space) {
+        My_Assert(neighbor_task != b, "neighbor task can't be itself!");
+
+        if (neighbor_task != DUMMY) {
+            //j can't be dummy and b can't be dummy neither here
+            int j = neighbor_task;
+
+            if (bi_considerable_move(ns, mcgrp, b, j)) {
+                move(ns,mcgrp);
+                return true;
+            }
+        }
+        else {
+            DEBUG_PRINT("Neighbor task is dummy task");
+            //j is dummy here but b can't be dummy
+            //each start and end location of each route will be considered
+            //total 2 x route_nums cases
+            int current_start = ns.solution.very_start->next->ID;
+
+            while (ns.solution[current_start]->next != ns.solution.very_end) {
+                // Consider the start location
+                int j = current_start;
+
+                if (b != j) { //not the same task
+                    if (bi_considerable_move(ns, mcgrp, b, j)) {
+                        move(ns,mcgrp);
+                        return true;
+                    }
+                }
+
+                // Consider the end location
+                const int current_route = ns.solution[current_start]->route_id;
+                const int current_end = ns.routes[current_route]->end;
+                j = current_end;
+                if (b != j) {
+                    if (bi_considerable_move(ns, mcgrp, b, j)) {
+                        move(ns,mcgrp);
+                        return true;
+                    }
+                }
+
+                // Advance to next route's starting task
+                current_start = ns.solution[current_end]->next->next->ID;
+            }
+
+        }
+
+    }
+
+    return false;
+}
+
+bool SingleInsert::bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int b, const int j)
+{
+    My_Assert(j>=1 && j<=mcgrp.actual_task_num,"Wrong task");
+    My_Assert(b>=1 && b <=mcgrp.actual_task_num,"Wrong task");
+    My_Assert(b != j,"You cannot insert the same task!");
+
+
+    const int a = max(ns.solution[b]->pre->ID , 0);
+    const int c = max(ns.solution[b]->next->ID , 0);
+
+    if (c == j) {
+        // ...a-b-c(j)-k...
+        //no need to presert
+        postsert_times++;
+        if (postsert.bi_considerable_move(ns, mcgrp, b, j)) {
+            move_result = postsert.move_result;
+            return true;
+        }
+        else {
+            move_result.reset();
+            move_result.move_type = NeighborOperator::SINGLE_INSERT;
+            return false;
+        }
+    }
+    else if (a == j) {
+        // ...i-j(a)-b-c
+        //no need to do postsert
+        presert_times++;
+        if (presert.bi_considerable_move(ns, mcgrp, b, j)) {
+            move_result = presert.move_result;
+            return true;
+        }
+        else {
+            move_result.reset();
+            move_result.move_type = NeighborOperator::SINGLE_INSERT;
+            return false;
+        }
+    }
+    else{
+        //...a-b-c...
+        //...i-j-k...
+
+        //check presert and postsert
+        if(presert.bi_considerable_move(ns, mcgrp, b, j)){
+            move_result = presert.move_result;
+            return true;
+        }
+        else if (postsert.bi_considerable_move(ns, mcgrp, b, j)){
+                move_result = postsert.move_result;
+                return true;
+        }
+        else{
+            //No considerable
+            move_result.reset();
+            move_result.move_type = NeighborOperator::SINGLE_INSERT;
+            return false;
+        }
+    }
+
+    My_Assert(false,"Cannot reach here!");
+}
+
 

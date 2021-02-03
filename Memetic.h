@@ -1,11 +1,14 @@
 #pragma once
 #include "NeighborSearch.h"
 #include "MCGRP.h"
+#include <utility>
 #include <vector>
 #include <thread>
 #include <future>
 #include <functional>
 #include <queue>
+#include <cfloat>
+#include <algorithm>
 
 using std::vector;
 
@@ -269,5 +272,4 @@ public:
      */
     bool poolUpdate(const MCGRP &mcgrp, const vector<int> new_sol, const double new_obj);
 };
-
 

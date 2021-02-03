@@ -41,6 +41,12 @@ public:
     /*----------------High speed neighbor search---------------------*/
     bool search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task);
 
+    bool bi_search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task);
+
+    bool bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int b, const int j);
+
+
+
     /*!
      * @details insert task b to task j
      * @param ns

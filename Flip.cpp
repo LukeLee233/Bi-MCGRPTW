@@ -1,5 +1,8 @@
 #include "Flip.h"
 #include <algorithm>
+#include "biobj.h"
+
+extern class BIOBJ biobj;
 
 using namespace std;
 
@@ -231,7 +234,6 @@ void Flip::move(NeighBorSearch &ns, const MCGRP &mcgrp)
 }
 
 
-
 bool NewFlip::considerable_move(NeighBorSearch &ns, const MCGRP &mcgrp, int start_task, int end_task){
     My_Assert(start_task != DUMMY && end_task != DUMMY, "Flip can't handle dummy task!");
     My_Assert(ns.route_id[start_task] == ns.route_id[end_task],"Flip attempted using different routes!");
@@ -411,7 +413,8 @@ vector<int> NewFlip::get_sequence(NeighBorSearch &ns, const int start, const int
  *
  */
 
-bool NewFlip::considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int start_task, int end_task){
+bool NewFlip::considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int start_task, int end_task)
+{
     vector<int> candidate_seq = get_sequence(ns,start_task, end_task);
 
     //No need flipping
@@ -531,4 +534,89 @@ vector<int> NewFlip::get_sequence(HighSpeedNeighBorSearch &ns, const int start, 
     }
 
     return buffer;
+}
+
+bool NewFlip::bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int start_task, int end_task)
+{
+    vector<int> candidate_seq = get_sequence(ns,start_task, end_task);
+
+    //No need flipping
+    if(candidate_seq.size() <= 1){
+        move_result.reset();
+        return false;
+    }
+
+    My_Assert(all_of(candidate_seq.begin(),candidate_seq.end(),[&](int i){return i>=1 && i<=mcgrp.actual_task_num;}),"Wrong task");
+    My_Assert(ns.solution[candidate_seq.front()]->route_id == ns.solution[candidate_seq.back()]->route_id,"Flip attempted using different routes!");
+
+    move_result.choose_tasks(start_task, end_task);
+    move_result.move_arguments = candidate_seq;
+
+    double delta = 0;
+    start_task = max(start_task,0);
+    end_task = max(end_task,0);
+
+    delta -= mcgrp.min_cost[mcgrp.inst_tasks[start_task].tail_node][mcgrp.inst_tasks[candidate_seq.front()].head_node];
+    for(int cur = 0; cur < candidate_seq.size() - 1; cur++){
+        delta -= mcgrp.inst_tasks[candidate_seq[cur]].serv_cost;
+        delta -= mcgrp.min_cost[mcgrp.inst_tasks[candidate_seq[cur]].tail_node][mcgrp.inst_tasks[candidate_seq[cur+1]].head_node];
+    }
+    delta -= mcgrp.inst_tasks[candidate_seq.back()].serv_cost;
+    delta -= mcgrp.min_cost[mcgrp.inst_tasks[candidate_seq.back()].tail_node][mcgrp.inst_tasks[end_task].head_node];
+
+    reverse(candidate_seq.begin(),candidate_seq.end());
+
+    delta += mcgrp.min_cost[mcgrp.inst_tasks[start_task].tail_node][mcgrp.inst_tasks[candidate_seq.front()].head_node];
+
+    for(int cur = 0;cur<candidate_seq.size()-1;cur++){
+        delta += mcgrp.inst_tasks[candidate_seq[cur]].serv_cost;
+        delta += mcgrp.min_cost[mcgrp.inst_tasks[candidate_seq[cur]].tail_node][mcgrp.inst_tasks[candidate_seq[cur + 1]].head_node];
+    }
+
+    delta += mcgrp.inst_tasks[candidate_seq.back()].serv_cost;
+    delta += mcgrp.min_cost[mcgrp.inst_tasks[candidate_seq.back()].tail_node][mcgrp.inst_tasks[end_task].head_node];
+
+
+    move_result.num_affected_routes = 1;
+
+    const int route_id = ns.solution[candidate_seq.front()]->route_id;
+    move_result.route_id.push_back(route_id);
+    move_result.delta = delta;
+
+    move_result.route_lens.push_back(ns.routes[route_id]->length + move_result.delta);
+
+    vector<double> routes_length;
+    for(int id : ns.routes.activated_route_id){
+        double route_length = ns.routes[id]->length;
+        if(id == route_id){
+            continue;
+        }
+
+        if(route_length != 0){
+            routes_length.push_back(route_length);
+        }
+    }
+
+    for(auto route_length : move_result.route_lens){
+        if(route_length != 0)
+            routes_length.push_back(route_length);
+    }
+
+    auto longest_route = max_element(std::begin(routes_length), std::end(routes_length));
+    auto shortest_route = min_element(std::begin(routes_length), std::end(routes_length));
+    move_result.new_balance = *longest_route - *shortest_route;
+
+    if(!try_to_replace(biobj,{ns.cur_solution_cost + delta, move_result.new_balance})){
+        move_result.reset();
+        return false;
+    }
+
+
+    move_result.route_loads.push_back(ns.routes[route_id]->load);
+
+    move_result.route_custs_num.push_back(ns.routes[route_id]->num_customers);
+    move_result.new_total_route_length = ns.cur_solution_cost + move_result.delta;
+    move_result.considerable = true;
+
+    return true;
 }

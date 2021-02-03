@@ -693,6 +693,8 @@ int MCGRP::get_task_seq_total_cost(const std::vector<int> &delimiter_seq) const
         total_cost += min_cost[inst_tasks[delimiter_seq[i]].tail_node][inst_tasks[delimiter_seq[i + 1]].head_node]
             + inst_tasks[delimiter_seq[i]].serv_cost;
 
+
+
     return total_cost;
 }
 

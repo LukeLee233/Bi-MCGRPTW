@@ -6,6 +6,8 @@
 #include "ConstructPolicy.h"
 #include "RNG.h"
 #include <unordered_map>
+#include <algorithm>
+#include <numeric>
 
 using namespace std;
 
@@ -15,6 +17,7 @@ void nearest_scanning(const MCGRP &mcgrp, Individual &rs_indi)
     int serve_task_num = mcgrp.req_arc_num + mcgrp.req_node_num + mcgrp.req_edge_num;
 
     int load;
+    int cost;
     int trial;
     int mindist;
 
@@ -31,6 +34,7 @@ void nearest_scanning(const MCGRP &mcgrp, Individual &rs_indi)
 
     rs_indi.sequence.clear();
     rs_indi.route_seg_load.clear();
+    rs_indi.route_seg_cost.clear();
 
     //insert dummy task at the very beginning
     rs_indi.sequence.push_back(DUMMY);
@@ -42,6 +46,7 @@ void nearest_scanning(const MCGRP &mcgrp, Individual &rs_indi)
 
     load = 0;
     trial = 0;
+    cost = 0;
     while (trial < serve_task_num) {
         current_task = rs_indi.sequence.back();
 
@@ -55,9 +60,12 @@ void nearest_scanning(const MCGRP &mcgrp, Individual &rs_indi)
 
 
         if (candidate_task_set.empty()) {
+            cost += mcgrp.min_cost[mcgrp.inst_tasks[rs_indi.sequence.back()].tail_node][mcgrp.inst_tasks[DUMMY].head_node];
+            rs_indi.route_seg_cost.push_back(cost);
             rs_indi.sequence.push_back(DUMMY);
             rs_indi.route_seg_load.push_back(load);
             load = 0;
+            cost = 0;
             continue;
         }
 
@@ -86,10 +94,10 @@ void nearest_scanning(const MCGRP &mcgrp, Individual &rs_indi)
 
 
         trial++;
+        cost += mcgrp.min_cost[mcgrp.inst_tasks[rs_indi.sequence.back()].tail_node][mcgrp.inst_tasks[chosen_task].head_node] + mcgrp.inst_tasks[chosen_task].serv_cost;
         rs_indi.sequence.push_back(chosen_task);
 
         load += mcgrp.inst_tasks[chosen_task].demand;
-
         unserved_task_id_set.erase(std::find_if(unserved_task_id_set.begin(),
                                                 unserved_task_id_set.end(),
                                                 [chosen_task](const int &elem) -> bool
@@ -106,11 +114,19 @@ void nearest_scanning(const MCGRP &mcgrp, Individual &rs_indi)
     }
 
     if (rs_indi.sequence.back() != DUMMY) {
+        cost += mcgrp.min_cost[mcgrp.inst_tasks[rs_indi.sequence.back()].tail_node][mcgrp.inst_tasks[DUMMY].head_node];
+        rs_indi.route_seg_cost.push_back(cost);
+
         rs_indi.sequence.push_back(DUMMY);
         rs_indi.route_seg_load.push_back(load);
     }
 
+    auto longest_route = max_element(std::begin(rs_indi.route_seg_cost), std::end(rs_indi.route_seg_cost));
+    auto shortest_route = min_element(std::begin(rs_indi.route_seg_cost), std::end(rs_indi.route_seg_cost));
+    rs_indi.balance = *longest_route - *shortest_route;
+
     rs_indi.total_cost = mcgrp.get_task_seq_total_cost(rs_indi.sequence);
+    My_Assert(rs_indi.total_cost == accumulate(rs_indi.route_seg_cost.begin(),rs_indi.route_seg_cost.end(),0), "route_seg_check");
     rs_indi.total_vio_load = mcgrp.get_total_vio_load(rs_indi.route_seg_load);
     My_Assert(rs_indi.total_vio_load == 0, "Should construct a feasible sequence here!");
 }

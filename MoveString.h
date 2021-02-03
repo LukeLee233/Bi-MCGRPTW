@@ -50,6 +50,7 @@ public:
      * @return
      */
     bool considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, vector<int> disturbance_seq, const int u);
+    bool bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, vector<int> disturbance_seq, const int u);
 
     void move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp);
 };
@@ -73,6 +74,7 @@ public:
      * @return
      */
     bool considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, vector<int> disturbance_seq, const int u);
+    bool bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, vector<int> disturbance_seq, const int u);
 
     void move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp);
 };

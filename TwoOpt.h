@@ -69,10 +69,16 @@ public:
 
 
     bool search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task);
+    bool bi_search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task);
 
     bool considerable_move(HighSpeedNeighBorSearch &ns,
                                   const MCGRP &mcgrp,
                                   int a, int b, int c, int d);
+
+    bool bi_considerable_move(HighSpeedNeighBorSearch &ns,
+                           const MCGRP &mcgrp,
+                           int a, int b, int c, int d);
+
 
     void move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp);
 

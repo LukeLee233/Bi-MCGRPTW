@@ -1,5 +1,5 @@
-#include <iostream>
-#include <sys/timeb.h>
+#include <bits/stdc++.h>
+#include "biobj.h"
 #include "file.h"
 #include "utils.h"
 #include "MCGRP.h"
@@ -17,8 +17,6 @@
 #include "Invert.h"
 #include "TwoOpt.h"
 #include <boost/program_options.hpp>
-#include <algorithm>
-#include <numeric>
 #include "json.hpp"
 #include "config.h"
 
@@ -29,6 +27,7 @@ using json = nlohmann::json;
 struct timeb phase_start_time;
 struct timeb cur_time;
 
+BIOBJ biobj(10);
 
 int main(int argc, char *argv[])
 {
@@ -181,19 +180,9 @@ int main(int argc, char *argv[])
              << string (24,'-') << string(2,'\n')
              << flush;
 
-        /* global info */
-        double bestobj = numeric_limits<decltype(bestobj)>::max();
-        double best_solution_time = numeric_limits<decltype(best_solution_time)>::max();
-        int best_phase = -1;
-        vector<int> best_buffer;
-        vector<double> FitnessVec;
-        vector<double> BestTimeVec;
-        vector<double> SearchTimeVec;
-        vector<vector<int>> SolutionVec;
-
         /************************************************************************************************/
         /* initialize the instance object */
-        instance_num_information instance_info;
+        instance_num_information instance_info{};
         GetTasksNum(instance_directory + '/' + file_name, instance_info);
 
         RNG rng = RNG();
@@ -221,83 +210,28 @@ int main(int argc, char *argv[])
             HighSpeedNeighBorSearch NBS(Mixed_Instance);
 
             /*----------------------------------------------------------*/
-            cout << "Begin Memetic search..." << endl;
-            HighSpeedMemetic MA(NBS, pool_size, evolve_steps, QNDF_weights);
-            ftime(&phase_start_time);
-            MA.memetic_search(Mixed_Instance);
-            ftime(&cur_time);
+            cout << "Begin search..." << endl;
+            biobj.init_population(Mixed_Instance);
+            for(auto &member : biobj.members){
+                cout<< member.objectives.first << " "<< member.objectives.second<<endl;
+            }
+            cout << endl;
+            biobj.search(Mixed_Instance);
             cout << "Finish " << start_seed - random_seed << "th search, spent: "
                  << get_time_difference(phase_start_time,cur_time) << 's' << endl;
 
-            /*----------------------------------------------------------*/
 
-            /* solution record */
-            ftime(&cur_time);
-            SearchTimeVec.push_back(get_time_difference(phase_start_time,cur_time));
-
-            /* record the best info of each epoch */
-            FitnessVec.push_back(Mixed_Instance.best_total_route_length);
-            BestTimeVec.push_back(Mixed_Instance.best_sol_time);
-            SolutionVec.push_back(Mixed_Instance.best_sol_buff);
-
-            cout << "Finish " << start_seed - random_seed + 1 << "th times\n";
-
-            /* record the best solution during the whole searching process*/
-            if (Mixed_Instance.best_total_route_length < bestobj) {
-                best_solution_time = Mixed_Instance.best_sol_time;
-                bestobj = Mixed_Instance.best_total_route_length;
-                best_buffer = Mixed_Instance.best_sol_buff;
-                best_phase = start_seed - random_seed + 1;
+            log_out.open(date_folder + "/" + file_name, ios::out);
+            for(auto &member : biobj.members){
+                string s = to_string(member.objectives.first) + " " + to_string(member.objectives.second);
+                print(cout, log_out, s);
             }
+            print(cout, log_out, "\n");
+            log_out.close();
 
+
+            biobj.clear();
         }
-
-#ifdef DEBUG
-        log_out.close();
-#endif
-
-        /***********************************output part********************************************/
-        if (bestobj == numeric_limits<decltype(bestobj)>::max()) {
-            cerr << "ERROR! Can't find a solution\n";
-            abort();
-        }
-        double total_cost = accumulate(FitnessVec.begin(), FitnessVec.end(), 0);
-        double best_total_time = accumulate(BestTimeVec.begin(), BestTimeVec.end(), 0);
-        double total_time = accumulate(SearchTimeVec.begin(), SearchTimeVec.end(), 0);
-        double average_cost = total_cost / FitnessVec.size();
-        double average_best_time = best_total_time / BestTimeVec.size();
-        double average_search_time = total_time / SearchTimeVec.size();
-
-        cout << string(2,'\n') << string(24,'*')
-             << "Searching Finish!" << string(24,'*') << endl;
-        cout << "Searching result:"<<string(2,'\n') << flush;
-
-
-        result_out.open(result_dir + '/' + file_name + ".res", ios::out);
-        result_out << setprecision(2) << fixed;
-
-        print(cout, result_out, "Instance: " + file_name);
-        print(cout, result_out, "Best Cost: " + to_string(bestobj));
-        print(cout, result_out, "Best Cost Epoch: " + to_string(best_phase));
-        print(cout, result_out, "Best Solution Search Time: " + to_string(best_solution_time) + 's');
-        print(cout, result_out, "Best Solution: ");
-
-        string buff = "";
-        for (int i = 0; i < best_buffer.size(); i++) {
-            if (i == best_buffer.size() - 1)
-                buff += to_string(best_buffer[i]);
-            else
-                buff += (to_string(best_buffer[i]) + "->");
-        }
-        print(cout, result_out, buff);
-
-        print(cout, result_out, "\n\nSearch time: " + to_string(FitnessVec.size()));
-
-
-        print(cout, result_out, "\n\nAverage cost: " + to_string(average_cost));
-        print(cout, result_out, "Average best solution search time: " + to_string(average_best_time) + 's');
-        print(cout, result_out, "Average search time: " + to_string(average_search_time) + 's');
-        result_out.close();
     }
 
     return 0;

@@ -34,4 +34,6 @@
 *.app
 
 .idea
-cmake-build-default
+cmake*
+
+图片

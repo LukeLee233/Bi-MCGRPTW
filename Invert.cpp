@@ -1,6 +1,10 @@
 #include "Invert.h"
 #include <algorithm>
 
+#include "biobj.h"
+
+extern class BIOBJ biobj;
+
 using namespace std;
 
 
@@ -296,5 +300,84 @@ void Invert::unit_test(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp)
     ns.policy.set(original_policy);
     ns.policy.beta = 0;
     ns.policy.tolerance = 0;
+}
+
+bool Invert::bi_search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task)
+{
+    //No seach space in Invert operator, No accept rule for invert operator
+    My_Assert(chosen_task != DUMMY, "Chosen task can't be dummy");
+
+    if (!mcgrp.is_edge(chosen_task)) {
+        return false;
+    }
+    else if (bi_considerable_move(ns, mcgrp, chosen_task)) {
+        move(ns, mcgrp);
+        return true;
+    }
+    else
+    {
+        move_result.reset();
+        return false;
+    }
+}
+
+bool Invert::bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int u)
+{
+    My_Assert(u != DUMMY, "task u cannot be dummy task!");
+    My_Assert(mcgrp.is_edge(u), "task u must be edge task!");
+
+    const int u_tilde = mcgrp.inst_tasks[u].inverse;
+
+    int t, v;
+    t = max(ns.solution[u]->pre->ID, DUMMY);
+    v = max(ns.solution[u]->next->ID, DUMMY);
+
+    const double tu = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[u].head_node];
+    const double uv = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[v].head_node];
+
+    const double tu_tilde = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[u_tilde].head_node];
+    const double u_tildev = mcgrp.min_cost[mcgrp.inst_tasks[u_tilde].tail_node][mcgrp.inst_tasks[v].head_node];
+
+    const double
+        delta = -tu - uv - mcgrp.inst_tasks[u].serv_cost + tu_tilde + u_tildev + mcgrp.inst_tasks[u_tilde].serv_cost;
+
+    int u_route = ns.solution[u]->route_id;
+
+    move_result.choose_tasks(u, u_tilde);
+//    move_result.num_affected_routes = 1;
+    move_result.delta = delta;
+    move_result.route_id.push_back(u_route);
+    move_result.route_lens.push_back(ns.routes[u_route]->length + move_result.delta);
+
+    vector<double> routes_length;
+    for(int route_id : ns.routes.activated_route_id){
+        double route_length = ns.routes[route_id]->length;
+        if(route_id == u_route){
+            route_length += delta;
+        }
+
+        if(route_length != 0){
+            routes_length.push_back(route_length);
+        }
+    }
+
+    auto longest_route = max_element(std::begin(routes_length), std::end(routes_length));
+    auto shortest_route = min_element(std::begin(routes_length), std::end(routes_length));
+    move_result.new_balance = *longest_route - *shortest_route;
+
+    if(!try_to_replace(biobj,{ns.cur_solution_cost + delta, move_result.new_balance})){
+        move_result.reset();
+        return false;
+    }
+
+//    move_result.route_loads.push_back(ns.routes[u_route]->load);
+//    move_result.route_custs_num.push_back(ns.routes[u_route]->num_customers);
+    move_result.new_total_route_length = ns.cur_solution_cost + move_result.delta;
+//    move_result.total_number_of_routes = ns.routes.activated_route_id.size();
+    move_result.move_arguments.push_back(u);
+    move_result.move_arguments.push_back(u_tilde);
+    move_result.considerable = true;
+
+    return true;
 }
 

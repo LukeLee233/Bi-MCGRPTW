@@ -21,7 +21,7 @@ bool DoubleInsert::search(NeighBorSearch &ns, const MCGRP &mcgrp, int chosen_tas
     My_Assert(chosen_seq.size()>0,"You cannot generate an empty sequence!");
 
     if (chosen_seq.size() != length) {
-        DEBUG_PRINT("The length after chosen task is not two in the double insert");
+//        DEBUG_PRINT("The length after chosen task is not two in the double insert");
         return false;
     }
 
@@ -271,7 +271,7 @@ bool DoubleInsert::search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int c
     My_Assert(chosen_seq.size()>0,"You cannot generate an empty sequence!");
 
     if (chosen_seq.size() != length) {
-        DEBUG_PRINT("The length after chosen task is not two in the double insert");
+//        DEBUG_PRINT("The length after chosen task is not two in the double insert");
         return false;
     }
 
@@ -576,4 +576,145 @@ void DoubleInsert::unit_test(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp)
     ns.policy.set(original_policy);
     ns.policy.beta = 0;
     ns.policy.tolerance = 0;
+}
+
+bool DoubleInsert::bi_search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task)
+{
+    My_Assert(chosen_task >= 1 && chosen_task <= mcgrp.actual_task_num,"Wrong task");
+
+    ns.create_search_neighborhood(mcgrp, chosen_task);
+
+    vector<int> chosen_seq = get_successor_tasks(ns, chosen_task);
+
+    My_Assert(chosen_seq.size()>0,"You cannot generate an empty sequence!");
+
+    if (chosen_seq.size() != length) {
+//        DEBUG_PRINT("The length after chosen task is not two in the double insert");
+        return false;
+    }
+
+    int b = chosen_seq.front();
+
+    for(auto neighbor_task : ns.search_space) {
+        My_Assert(neighbor_task != b, "neighbor task can't be itself!");
+
+        if (neighbor_task != DUMMY) {
+            //j can't be dummy and b can't be dummy neither here
+            int j = neighbor_task;
+
+            if (std::find(chosen_seq.begin(), chosen_seq.end(), j) == chosen_seq.end()) {
+                // doesn't overlap
+                if (bi_considerable_move(ns, mcgrp, chosen_seq, j)) {
+                    move(ns, mcgrp);
+                    return true;
+                }
+            }
+        }
+        else {
+            DEBUG_PRINT("Neighbor task is dummy task");
+            //j is dummy here and b can't be dummy neither
+            //each start and end location of each route will be considered
+            //total 2 x route_nums cases
+
+            int current_start = ns.solution.very_start->next->ID;
+
+            while (ns.solution[current_start]->next != ns.solution.very_end) {
+                // Consider the start location
+                int j = current_start;
+
+                if (std::find(chosen_seq.begin(), chosen_seq.end(), j) == chosen_seq.end()) {
+                    // doesn't overlap
+                    if (bi_considerable_move(ns, mcgrp, chosen_seq, j)) {
+                        move(ns, mcgrp);
+                        return true;
+                    }
+                }
+
+                // Consider the end location
+                const int current_route = ns.solution[current_start]->route_id;
+                const int current_end = ns.routes[current_route]->end;
+                j = current_end;
+                if (std::find(chosen_seq.begin(), chosen_seq.end(), j) == chosen_seq.end()) {
+                    // doesn't overlap
+                    if (bi_considerable_move(ns, mcgrp, chosen_seq, j)) {
+                        move(ns, mcgrp);
+                        return true;
+                    }
+                }
+
+                // Advance to next route's starting task
+                current_start = ns.solution[current_end]->next->next->ID;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool DoubleInsert::bi_considerable_move(HighSpeedNeighBorSearch &ns,
+                                        const MCGRP &mcgrp,
+                                        vector<int> disturbance_seq,
+                                        const int j)
+{
+
+    My_Assert(j >= 1 && j <= mcgrp.actual_task_num,"Wrong task");
+
+    My_Assert(!disturbance_seq.empty(),"disturbance seq can't be empty!");
+    My_Assert(all_of(disturbance_seq.begin(),disturbance_seq.end(),[&](int i){return i>=1 && i<=mcgrp.actual_task_num;}),"Wrong task");
+    My_Assert(find(disturbance_seq.begin(),disturbance_seq.end(),j) == disturbance_seq.end(),"Overlap");
+
+    const int i = max(ns.solution[j]->pre->ID, 0);
+    const int k = max(ns.solution[j]->next->ID, 0);
+
+    //suppose disturbance sequenec is dis(0)-dis(1)-dis(2)
+    if(disturbance_seq.back() == i){
+        //...dis(0)-dis(1)-dis(2)(i)-j-k...
+        //no need to presert
+        postsert_times++;
+        if (post_move_string.bi_considerable_move(ns, mcgrp, disturbance_seq, j) && ns.policy.check_move(post_move_string.move_result)) {
+            move_result = post_move_string.move_result;
+            return true;
+        }
+        else {
+            move_result.reset();
+            move_result.move_type = NeighborOperator::DOUBLE_INSERT;
+            return false;
+        }
+    }
+    else if (disturbance_seq.front() == k){
+        //...i-j-dis(0)(k)-dis(1)-dis(2)...
+        //no need to postsert
+        presert_times++;
+        if (pre_move_string.bi_considerable_move(ns, mcgrp, disturbance_seq, j) && ns.policy.check_move(pre_move_string.move_result)) {
+            move_result = pre_move_string.move_result;
+            return true;
+        }
+        else {
+            move_result.reset();
+            move_result.move_type = NeighborOperator::DOUBLE_INSERT;
+            return false;
+        }
+    }
+    else{
+        //...dis(0)-dis(1)-dis(2)...
+        //...i-j-k...
+
+        //check presert and postsert
+        if (pre_move_string.bi_considerable_move(ns, mcgrp, disturbance_seq, j)){
+            move_result = pre_move_string.move_result;
+            return true;
+        }
+        else if (post_move_string.bi_considerable_move(ns, mcgrp, disturbance_seq, j)){
+            move_result = post_move_string.move_result;
+            return true;
+        }
+        else{
+            //No considerable
+            move_result.reset();
+            move_result.move_type = NeighborOperator::DOUBLE_INSERT;
+            return false;
+        }
+    }
+
+    My_Assert(false,"Cannot reach here!");
 }

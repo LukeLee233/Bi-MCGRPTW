@@ -1,8 +1,10 @@
 #include "PostSert.h"
 #include <algorithm>
+#include "biobj.h"
 
 using std::max;
 
+extern class BIOBJ biobj;
 
 bool Postsert::considerable_move(NeighBorSearch &ns, const MCGRP &mcgrp, int u, const int i)
 {
@@ -348,6 +350,8 @@ void Postsert::move(NeighBorSearch &ns, const MCGRP &mcgrp)
 
     ns.search_step++;
 }
+
+
 
 bool Postsert::considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int u, const int i)
 {
@@ -879,4 +883,307 @@ void Postsert::move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp)
 
     move_result.reset();
     ns.search_step++;
+}
+
+bool Postsert::bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int u, const int i)
+{
+    My_Assert(i>=1 && i<=mcgrp.actual_task_num,"Wrong task");
+    My_Assert(u>=1 && u<=mcgrp.actual_task_num,"Wrong task");
+
+    if(ns.solution[u]->pre->ID == i){
+        // Nothing to do
+        move_result.reset();
+        return false;
+    }
+
+    const int i_route = ns.solution[i]->route_id;
+    const int u_route = ns.solution[u]->route_id;
+
+
+    // Can check load feasibility easily
+    double vio_load_delta = 0;
+    if (u_route != i_route) {
+        if (ns.policy.has_rule(DELTA_ONLY)) {
+            if (ns.routes[i_route]->load + mcgrp.inst_tasks[u].demand > mcgrp.capacity) {
+                move_result.reset();
+                return false;
+            }
+        }
+        else if (ns.policy.has_rule(FITNESS_ONLY)) {
+            //i_route vio-load calculate
+            if (ns.routes[i_route]->load + mcgrp.inst_tasks[u].demand > mcgrp.capacity) {
+                //if insert task to route i and over load
+                if (ns.routes[i_route]->load >= mcgrp.capacity) {
+                    //if the route i already over loaded
+                    vio_load_delta += mcgrp.inst_tasks[u].demand;
+                }
+                else {
+                    vio_load_delta += ns.routes[i_route]->load + mcgrp.inst_tasks[u].demand - mcgrp.capacity;
+                }
+            }
+
+            //u_route vio-load calculate
+            if (ns.routes[u_route]->load > mcgrp.capacity) {
+                //if remove task from route u and over load
+                if (ns.routes[u_route]->load - mcgrp.inst_tasks[u].demand >= mcgrp.capacity) {
+                    //if still over loaded
+                    vio_load_delta -= mcgrp.inst_tasks[u].demand;
+                }
+                else {
+                    vio_load_delta -= (ns.routes[u_route]->load - mcgrp.capacity);
+                }
+            }
+        }
+    }
+
+    const int original_u = u;
+
+    move_result.choose_tasks(original_u, i);
+    move_result.move_arguments.push_back(original_u);
+
+    if (mcgrp.is_edge(u)) {
+        const int t = max(ns.solution[u]->pre->ID, 0);
+        const int v = max(ns.solution[u]->next->ID, 0);
+        const int j = max(ns.solution[i]->next->ID, 0);
+
+        const int u_tilde = mcgrp.inst_tasks[u].inverse;
+
+        const double tu = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[u].head_node];
+        const double uv = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[v].head_node];
+        const double tv = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[v].head_node];
+
+        const double iu = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[u].head_node];
+        const double uj = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[j].head_node];
+        const double ij = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[j].head_node];
+
+        const double iu_tilde = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[u_tilde].head_node];
+        const double u_tildej = mcgrp.min_cost[mcgrp.inst_tasks[u_tilde].tail_node][mcgrp.inst_tasks[j].head_node];
+
+
+        const double u_delta = tv - tu - uv - mcgrp.inst_tasks[u].serv_cost;
+        double i_delta = iu + uj - ij + mcgrp.inst_tasks[u].serv_cost;
+        const double i_delta1 = iu_tilde + u_tildej - ij + mcgrp.inst_tasks[u_tilde].serv_cost;
+        double delta = i_delta + u_delta;
+        const double delta1 = i_delta1 + u_delta;
+
+        if (delta1 < delta) {
+            u = u_tilde;
+            i_delta = i_delta1;
+            delta = delta1;
+        }
+
+        vector<double> routes_length;
+        for(int route_id : ns.routes.activated_route_id){
+            double route_length = ns.routes[route_id]->length;
+            if(route_id == u_route){
+                route_length += u_delta;
+            }
+
+            if(route_id == i_route){
+                route_length += i_delta;
+            }
+            if(route_length != 0){
+                routes_length.push_back(route_length);
+            }
+        }
+
+        auto longest_route = max_element(std::begin(routes_length), std::end(routes_length));
+        auto shortest_route = min_element(std::begin(routes_length), std::end(routes_length));
+        move_result.new_balance = *longest_route - *shortest_route;
+
+        if(!try_to_replace(biobj,{ns.cur_solution_cost + delta, move_result.new_balance})){
+            move_result.reset();
+            return false;
+        }
+
+
+        const int start_u = ns.routes[u_route]->start;
+        const int end_u = ns.routes[u_route]->end;
+        // Check if we need to reduce the # of routes here
+        // The original u route only has task u itself
+        if (start_u == end_u)
+            move_result.total_number_of_routes = ns.routes.activated_route_id.size() - 1;
+        else
+            move_result.total_number_of_routes = ns.routes.activated_route_id.size();
+
+
+        if (u_route == i_route) {
+            // u and i were in the same route originally
+            // The total length of route i is now old_length + delta
+            const double u_route_length = ns.routes[u_route]->length + delta;
+            const double u_route_load = ns.routes[u_route]->load;
+
+            move_result.num_affected_routes = 1;
+            move_result.delta = delta;
+
+            move_result.route_id.push_back(u_route);
+
+            move_result.route_lens.push_back(u_route_length);
+
+            move_result.route_loads.push_back(u_route_load);
+
+            move_result.route_custs_num.push_back(ns.routes[u_route]->num_customers); // no change
+
+            move_result.new_total_route_length = ns.cur_solution_cost + move_result.delta;
+            move_result.move_arguments.push_back(u);
+            move_result.move_arguments.push_back(i);
+
+            move_result.vio_load_delta = vio_load_delta;
+
+            move_result.considerable = true;
+
+            return true;
+        }
+        else {
+            // Different routes
+            const double demand_change = mcgrp.inst_tasks[u].demand;
+            const double i_route_length = ns.routes[i_route]->length + i_delta;
+            const double u_route_length = ns.routes[u_route]->length + u_delta;
+            const double i_route_load = ns.routes[i_route]->load + demand_change;
+            const double u_route_load = ns.routes[u_route]->load - demand_change;
+
+            move_result.num_affected_routes = 2;
+            move_result.delta = delta;
+
+            move_result.route_id.push_back(u_route);
+            move_result.route_id.push_back(i_route);
+
+            move_result.route_lens.push_back(u_route_length);
+            move_result.route_lens.push_back(i_route_length);
+
+            move_result.route_loads.push_back(u_route_load);
+            move_result.route_loads.push_back(i_route_load);
+
+            My_Assert(u != DUMMY, "You cannot postsert a dummy task");
+            move_result.route_custs_num.push_back(ns.routes[u_route]->num_customers - 1);
+            move_result.route_custs_num.push_back(ns.routes[i_route]->num_customers + 1);
+
+            move_result.new_total_route_length = ns.cur_solution_cost + move_result.delta;
+
+            move_result.move_arguments.push_back(u);
+            move_result.move_arguments.push_back(i);
+
+            move_result.vio_load_delta = vio_load_delta;
+
+            move_result.considerable = true;
+
+            return true;
+        }
+    }
+    else {
+        const int t = max(ns.solution[u]->pre->ID, 0);
+        const int v = max(ns.solution[u]->next->ID, 0);
+        const int j = max(ns.solution[i]->next->ID, 0);
+
+        const double tu = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[u].head_node];
+        const double uv = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[v].head_node];
+        const double tv = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[v].head_node];
+
+        const double iu = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[u].head_node];
+        const double uj = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[j].head_node];
+        const double ij = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[j].head_node];
+
+        const double u_delta = tv - tu - uv - mcgrp.inst_tasks[u].serv_cost;
+        const double i_delta = iu + uj - ij + mcgrp.inst_tasks[u].serv_cost;
+        const double delta = i_delta + u_delta;
+
+        vector<double> routes_length;
+        for(int route_id : ns.routes.activated_route_id){
+            double route_length = ns.routes[route_id]->length;
+            if(route_id == u_route){
+                route_length += u_delta;
+            }
+
+            if(route_id == i_route){
+                route_length += i_delta;
+            }
+            if(route_length != 0){
+                routes_length.push_back(route_length);
+            }
+        }
+
+        auto longest_route = max_element(std::begin(routes_length), std::end(routes_length));
+        auto shortest_route = min_element(std::begin(routes_length), std::end(routes_length));
+        move_result.new_balance = *longest_route - *shortest_route;
+
+        if(!try_to_replace(biobj,{ns.cur_solution_cost + delta, move_result.new_balance})){
+            move_result.reset();
+            return false;
+        }
+
+        // Check if we need to reduce the # of routes here
+        // The original u route only has task u itself
+        const int start_u = ns.routes[u_route]->start;
+        const int end_u = ns.routes[u_route]->end;
+        if (start_u == end_u)
+            move_result.total_number_of_routes = ns.routes.activated_route_id.size() - 1;
+        else
+            move_result.total_number_of_routes = ns.routes.activated_route_id.size();
+
+
+        if (u_route == i_route) {
+            // u and i were in the same route originally
+            // No overall change in the load here - we just shifted u around
+            // The total length of route i is now old_length + delta
+            const double u_route_length = ns.routes[u_route]->length + delta;
+            const double u_route_load = ns.routes[u_route]->load;
+
+            move_result.num_affected_routes = 1;
+            move_result.delta = delta;
+
+            move_result.route_loads.push_back(u_route_load);
+            move_result.route_custs_num.push_back(ns.routes[u_route]->num_customers);
+            move_result.route_id.push_back(u_route);
+
+            move_result.route_lens.push_back(u_route_length);
+
+            move_result.new_total_route_length = ns.cur_solution_cost + move_result.delta;
+
+            move_result.move_arguments.push_back(u);
+            move_result.move_arguments.push_back(i);
+
+            move_result.vio_load_delta = vio_load_delta;
+
+            move_result.considerable = true;
+
+            return true;
+        }
+        else {
+            // Different routes
+            const double demand_change = mcgrp.inst_tasks[u].demand;
+            const double i_route_length = ns.routes[i_route]->length + i_delta;
+            const double u_route_length = ns.routes[u_route]->length + u_delta;
+            const double i_route_load = ns.routes[i_route]->load + demand_change;
+            const double u_route_load = ns.routes[u_route]->load - demand_change;
+
+            move_result.num_affected_routes = 2;
+            move_result.delta = delta;
+
+            move_result.route_id.push_back(u_route);
+            move_result.route_id.push_back(i_route);
+
+            move_result.route_lens.push_back(u_route_length);
+            move_result.route_lens.push_back(i_route_length);
+
+            move_result.route_loads.push_back(u_route_load);
+            move_result.route_loads.push_back(i_route_load);
+
+            My_Assert(u != DUMMY, "You cannot postsert a dummy task");
+            move_result.route_custs_num.push_back(ns.routes[u_route]->num_customers - 1);
+            move_result.route_custs_num.push_back(ns.routes[i_route]->num_customers + 1);
+
+            move_result.new_total_route_length = ns.cur_solution_cost + move_result.delta;
+
+            move_result.move_arguments.push_back(u);
+            move_result.move_arguments.push_back(i);
+
+            move_result.vio_load_delta = vio_load_delta;
+
+            move_result.considerable = true;
+
+            return true;
+        }
+    }
+
+    My_Assert(false,"Cannot reach here!");
 }

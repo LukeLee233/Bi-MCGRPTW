@@ -50,6 +50,7 @@ public:
     void move(NeighBorSearch &ns, const MCGRP &mcgrp);
 
     bool considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int start_task, int end_task);
+    bool bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int start_task, int end_task);
 
     void move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp);
 };

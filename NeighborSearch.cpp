@@ -12,6 +12,7 @@
 #include <numeric>
 #include <bitset>
 #include <cmath>
+#include <cfloat>
 #include <algorithm>
 #include "config.h"
 #include "utils.h"
@@ -3264,4 +3265,16 @@ bool HighSpeedNeighBorSearch::check_duplicated(const MCGRP &mcgrp)
     }
 
     return true;
+}
+
+double HighSpeedNeighBorSearch::get_balance()
+{
+    double longest = 0;
+    double shortest = DBL_MAX;
+    for(auto id : routes.activated_route_id){
+        longest = max(longest,routes[id]->length);
+        shortest = min(shortest,routes[id]->length);
+    }
+
+    return longest - shortest;
 }

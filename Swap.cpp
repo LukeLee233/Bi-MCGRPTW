@@ -3,6 +3,9 @@
 #include <vector>
 #include <algorithm>
 
+#include "biobj.h"
+
+extern class BIOBJ biobj;
 
 using namespace std;
 
@@ -598,7 +601,7 @@ bool NewSwap::considerable_move(NeighBorSearch &ns, const MCGRP &mcgrp, int i, i
 
     if(distance_ == -1){
         //...h-i-u-v...
-        DEBUG_PRINT("Swap:two tasks are neighbor");
+//        DEBUG_PRINT("Swap:two tasks are neighbor");
         My_Assert(i_route == u_route,"Close tasks should be in the same route!");
         My_Assert(j == u,"j task must be equal with u task!");
 
@@ -795,7 +798,7 @@ bool NewSwap::considerable_move(NeighBorSearch &ns, const MCGRP &mcgrp, int i, i
     }
     else if (distance_ == 1){
         //...t-u-i-j...
-        DEBUG_PRINT("Swap:two tasks are neighbor");
+//        DEBUG_PRINT("Swap:two tasks are neighbor");
         My_Assert(i_route == u_route,"Close tasks should be in the same route!");
         My_Assert(v == i,"v task must be equal with i task!");
 
@@ -1409,7 +1412,7 @@ bool NewSwap::considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp,
 
     if(j == u){
         //...h-i-u-v...
-        DEBUG_PRINT("Swap:two tasks are neighbor");
+//        DEBUG_PRINT("Swap:two tasks are neighbor");
         My_Assert(i_route == u_route,"Close tasks should be in the same route!");
         My_Assert(t == i,"t task must be equal with i task!");
 
@@ -1606,7 +1609,7 @@ bool NewSwap::considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp,
     }
     else if (v == i){
         //...t-u-i-j...
-        DEBUG_PRINT("Swap:two tasks are neighbor");
+//        DEBUG_PRINT("Swap:two tasks are neighbor");
         My_Assert(i_route == u_route,"Close tasks should be in the same route!");
         My_Assert(u == h,"u task must be equal with h task!");
 
@@ -2433,4 +2436,699 @@ void NewSwap::unit_test(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp)
     ns.policy.set(original_policy);
     ns.policy.beta = 0;
     ns.policy.tolerance = 0;
+}
+
+bool NewSwap::bi_search(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int chosen_task)
+{
+    My_Assert(chosen_task >= 1 && chosen_task <= mcgrp.actual_task_num,"Wrong task");
+
+    ns.create_search_neighborhood(mcgrp, chosen_task);
+
+    int b = chosen_task;
+
+    for(auto neighbor_task : ns.search_space) {
+        My_Assert(neighbor_task != b, "neighbor task can't be itself!");
+
+        if (neighbor_task != DUMMY) {
+            //j can't be dummy and b can't be dummy neither here
+            int j = neighbor_task;
+            if (bi_considerable_move(ns, mcgrp, b, j)) {
+                move(ns, mcgrp);
+                return true;
+            }
+            else {
+                move_result.reset();
+                return false;
+            }
+        }
+        else {
+            DEBUG_PRINT("Neighbor task is dummy task");
+            //j is dummy here but b can't be dummy
+            //each start and end location of each route will be considered
+            //total 2 x route_nums cases
+
+            int current_start = ns.solution.very_start->next->ID;
+
+            while (current_start != DUMMY) {
+                // Consider the start location
+                int j = current_start;
+
+                if (b != j) { //not the same task
+                    if (bi_considerable_move(ns, mcgrp, b, j)) {
+                        move(ns, mcgrp);
+                        return true;
+                    }
+                }
+
+                // Consider the end location
+                const int current_route = ns.solution[current_start]->route_id;
+                const int current_end = ns.routes[current_route]->end;
+                j = current_end;
+                if (b != j) {
+                    if (bi_considerable_move(ns, mcgrp, b, j)) {
+                        move(ns, mcgrp);
+                        return true;
+                    }
+                }
+
+                // Advance to next route's starting task
+                current_start = ns.solution[current_end]->next->next->ID;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool NewSwap::bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int i, int u)
+{
+    My_Assert(u != i, "two task need to be different!");
+    My_Assert(i >= 1 && i <= mcgrp.actual_task_num,"Wrong task");
+    My_Assert(u >= 1 && u <= mcgrp.actual_task_num,"Wrong task");
+
+
+    const int original_u = u;
+    const int original_i = i;
+
+
+    int u_route, i_route;
+    u_route = ns.solution[u]->route_id;
+    i_route = ns.solution[i]->route_id;
+
+    // can check feasibility easily
+    int u_load_delta = 0;
+    int i_load_delta = 0;
+    double vio_load_delta = 0;
+    if (u_route != i_route) {
+
+        u_load_delta = mcgrp.inst_tasks[i].demand - mcgrp.inst_tasks[u].demand;
+        i_load_delta = mcgrp.inst_tasks[u].demand - mcgrp.inst_tasks[i].demand;
+
+        if (ns.policy.has_rule(DELTA_ONLY)) {
+            if (ns.routes[u_route]->load + u_load_delta > mcgrp.capacity) {
+                move_result.reset();
+                return false;
+            }    // route that used to contain u is infeasible
+
+            if (ns.routes[i_route]->load + i_load_delta > mcgrp.capacity) {
+                move_result.reset();
+                return false;    // route that used to contain i is infeasible
+            }
+        }
+        else if (ns.policy.has_rule(FITNESS_ONLY)) {
+            //u_route vio-load calculate
+            if (u_load_delta >= 0) {
+                //vio_load_delta may get bigger
+                if (ns.routes[u_route]->load + u_load_delta > mcgrp.capacity) {
+                    //if result is overload
+                    if (ns.routes[u_route]->load >= mcgrp.capacity) {
+                        //if the route u already over loaded
+                        vio_load_delta += u_load_delta;
+                    }
+                    else {
+                        vio_load_delta += ns.routes[u_route]->load - mcgrp.capacity + u_load_delta;
+                    }
+                }
+            }
+            else {
+                //vio_load_delta may get less
+                if (ns.routes[u_route]->load + u_load_delta > mcgrp.capacity) {
+                    //if result is overload
+                    vio_load_delta += u_load_delta;
+                }
+                else {
+                    //the result will be not overload
+                    if (ns.routes[u_route]->load > mcgrp.capacity) {
+                        //the route used to be overload
+                        vio_load_delta += mcgrp.capacity - ns.routes[u_route]->load;
+                    }
+                }
+            }
+
+            if (i_load_delta >= 0) {
+                //vio_load_delta may get bigger
+                if (ns.routes[i_route]->load + i_load_delta > mcgrp.capacity) {
+                    //if result is overload
+                    if (ns.routes[i_route]->load >= mcgrp.capacity) {
+                        //if the route u already over loaded
+                        vio_load_delta += i_load_delta;
+                    }
+                    else {
+                        vio_load_delta += ns.routes[i_route]->load - mcgrp.capacity + i_load_delta;
+                    }
+                }
+            }
+            else {
+                //vio_load_delta may get less
+                if (ns.routes[i_route]->load + i_load_delta > mcgrp.capacity) {
+                    //if result is overload
+                    vio_load_delta += i_load_delta;
+                }
+                else {
+                    //the result will be not overload
+                    if (ns.routes[i_route]->load > mcgrp.capacity) {
+                        //the route used to be overload
+                        vio_load_delta += mcgrp.capacity - ns.routes[i_route]->load;
+                    }
+                }
+            }
+        }
+    }
+
+    const int t = max(ns.solution[u]->pre->ID, 0);
+    const int v = max(ns.solution[u]->next->ID, 0);
+
+    const int h = max(ns.solution[i]->pre->ID, 0);
+    const int j = max(ns.solution[i]->next->ID, 0);
+
+
+    //These two info are used when two tasks are not in the same route
+    double u_delta = 0;
+    double i_delta = 0;
+
+    double delta = 0;
+
+    if(j == u){
+        //...h-i-u-v...
+//        DEBUG_PRINT("Swap:two tasks are neighbor");
+        My_Assert(i_route == u_route,"Close tasks should be in the same route!");
+        My_Assert(t == i,"t task must be equal with i task!");
+
+        double deltas[4];
+        if (mcgrp.is_edge(u) && mcgrp.is_edge(i)) {
+            const int u_tilde = mcgrp.inst_tasks[u].inverse;
+            const int i_tilde = mcgrp.inst_tasks[i].inverse;
+
+            const double uv = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[v].head_node];
+            const double hi = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double iu = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[u].head_node];
+            const double ui = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double iv = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[v].head_node];
+            const double hu = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[u].head_node];
+
+            const double i_tildev = mcgrp.min_cost[mcgrp.inst_tasks[i_tilde].tail_node][mcgrp.inst_tasks[v].head_node];
+            const double ui_tilde = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[i_tilde].head_node];
+            const double hu_tilde = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[u_tilde].head_node];
+            const double u_tildei = mcgrp.min_cost[mcgrp.inst_tasks[u_tilde].tail_node][mcgrp.inst_tasks[i].head_node];
+
+
+            const double u_tildei_tilde = mcgrp.min_cost[mcgrp.inst_tasks[u_tilde].tail_node][mcgrp.inst_tasks[i_tilde].head_node];
+
+            //remove the original connections firstly
+            double base = -hi - mcgrp.inst_tasks[i].serv_cost - iu - mcgrp.inst_tasks[u].serv_cost - uv;
+
+            //add new connections secondly
+            //...h-u-i-v...
+            deltas[0] = hu + mcgrp.inst_tasks[u].serv_cost + ui + mcgrp.inst_tasks[i].serv_cost + iv;
+
+            //...h-u-i_tilde-v...
+            deltas[1] = hu + mcgrp.inst_tasks[u].serv_cost + ui_tilde + mcgrp.inst_tasks[i_tilde].serv_cost + i_tildev;
+
+            //...h-u_tilde-i-v...
+            deltas[2] = hu_tilde + mcgrp.inst_tasks[u_tilde].serv_cost + u_tildei + mcgrp.inst_tasks[i].serv_cost + iv;
+
+            //...h-u_tilde-i_tilde-v...
+            deltas[3] = hu_tilde + mcgrp.inst_tasks[u_tilde].serv_cost + u_tildei_tilde + mcgrp.inst_tasks[i_tilde].serv_cost + i_tildev;
+
+            int cases = 0;
+            double best_delta = deltas[0];
+            for(int cursor = 1;cursor<4;cursor++){
+                if(deltas[cursor] < best_delta){
+                    cases = cursor;
+                    best_delta = deltas[cursor];
+                }
+            }
+
+            delta = best_delta + base;
+
+            //decide which task should be swapped finally
+            switch (cases){
+                case 0:
+                    u = u;
+                    i = i;
+                    break;
+                case 1:
+                    u = u;
+                    i = i_tilde;
+                    break;
+                case 2:
+                    u = u_tilde;
+                    i = i;
+                    break;
+                case 3:
+                    u = u_tilde;
+                    i = i_tilde;
+                    break;
+                default:
+                    My_Assert(false,"unknown cases!");
+            }
+
+        }
+        else if (mcgrp.is_edge(u)){
+
+            const int u_tilde = mcgrp.inst_tasks[u].inverse;
+
+            const double uv = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[v].head_node];
+            const double hi = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double iu = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[u].head_node];
+            const double ui = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double iv = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[v].head_node];
+            const double hu = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[u].head_node];
+
+            const double hu_tilde = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[u_tilde].head_node];
+            const double u_tildei = mcgrp.min_cost[mcgrp.inst_tasks[u_tilde].tail_node][mcgrp.inst_tasks[i].head_node];
+
+
+            //remove the original connections firstly
+            double base = -hi - mcgrp.inst_tasks[i].serv_cost - iu - mcgrp.inst_tasks[u].serv_cost - uv;
+
+            //add new connections secondly
+            //...h-u-i-v...
+            deltas[0] = hu + mcgrp.inst_tasks[u].serv_cost + ui + mcgrp.inst_tasks[i].serv_cost + iv;
+
+            //...h-u_tilde-i-v...
+            deltas[1] = hu_tilde + mcgrp.inst_tasks[u_tilde].serv_cost + u_tildei + mcgrp.inst_tasks[i].serv_cost + iv;
+
+            int cases = 0;
+            double best_delta = deltas[0];
+            for(int cursor = 1;cursor<2;cursor++){
+                if(deltas[cursor] < best_delta){
+                    cases = cursor;
+                    best_delta = deltas[cursor];
+                }
+            }
+
+            delta = best_delta + base;
+
+            //decide which task should be swapped finally
+            switch (cases){
+                case 0:
+                    u = u;
+                    i = i;
+                    break;
+                case 1:
+                    u = u_tilde;
+                    i = i;
+                    break;
+                default:
+                    My_Assert(false,"unknown cases!");
+            }
+        }
+        else if (mcgrp.is_edge(i)){
+            const int i_tilde = mcgrp.inst_tasks[i].inverse;
+
+            const double uv = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[v].head_node];
+            const double hi = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double iu = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[u].head_node];
+            const double ui = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double iv = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[v].head_node];
+            const double hu = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[u].head_node];
+
+            const double i_tildev = mcgrp.min_cost[mcgrp.inst_tasks[i_tilde].tail_node][mcgrp.inst_tasks[v].head_node];
+            const double ui_tilde = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[i_tilde].head_node];
+
+
+
+            //remove the original connections firstly
+            double base = -hi - mcgrp.inst_tasks[i].serv_cost - iu - mcgrp.inst_tasks[u].serv_cost - uv;
+
+            //add new connections secondly
+            //...h-u-i-v...
+            deltas[0] = hu + mcgrp.inst_tasks[u].serv_cost + ui + mcgrp.inst_tasks[i].serv_cost + iv;
+
+            //...h-u-i_tilde-v...
+            deltas[1] = hu + mcgrp.inst_tasks[u].serv_cost + ui_tilde + mcgrp.inst_tasks[i_tilde].serv_cost + i_tildev;
+
+
+            int cases = 0;
+            double best_delta = deltas[0];
+            for(int cursor = 1;cursor<2;cursor++){
+                if(deltas[cursor] < best_delta){
+                    cases = cursor;
+                    best_delta = deltas[cursor];
+                }
+            }
+
+            delta = best_delta + base;
+
+            //decide which task should be swapped finally
+            switch (cases){
+                case 0:
+                    u = u;
+                    i = i;
+                    break;
+                case 1:
+                    u = u;
+                    i = i_tilde;
+                    break;
+                default:
+                    My_Assert(false,"unknown cases!");
+            }
+        }
+        else{
+            const double uv = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[v].head_node];
+            const double hi = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double iu = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[u].head_node];
+            const double ui = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double iv = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[v].head_node];
+            const double hu = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[u].head_node];
+
+            //remove the original connections firstly
+            double base = -hi - mcgrp.inst_tasks[i].serv_cost - iu - mcgrp.inst_tasks[u].serv_cost - uv;
+
+            //add new connections secondly
+            //...h-u-i-v...
+            deltas[0] = hu + mcgrp.inst_tasks[u].serv_cost + ui + mcgrp.inst_tasks[i].serv_cost + iv;
+
+            double best_delta = deltas[0];
+
+            delta = best_delta + base;
+        }
+    }
+    else if (v == i){
+        //...t-u-i-j...
+//        DEBUG_PRINT("Swap:two tasks are neighbor");
+        My_Assert(i_route == u_route,"Close tasks should be in the same route!");
+        My_Assert(u == h,"u task must be equal with h task!");
+
+        double deltas[4];
+        if (mcgrp.is_edge(u) && mcgrp.is_edge(i)) {
+            const int u_tilde = mcgrp.inst_tasks[u].inverse;
+            const int i_tilde = mcgrp.inst_tasks[i].inverse;
+
+            const double tu = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[u].head_node];
+            const double ij = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[j].head_node];
+            const double iu = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[u].head_node];
+            const double ui = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double ti = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double uj = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[j].head_node];
+
+            const double ti_tilde = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[i_tilde].head_node];
+            const double i_tildeu = mcgrp.min_cost[mcgrp.inst_tasks[i_tilde].tail_node][mcgrp.inst_tasks[u].head_node];
+            const double iu_tilde = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[u_tilde].head_node];
+            const double u_tildej = mcgrp.min_cost[mcgrp.inst_tasks[u_tilde].tail_node][mcgrp.inst_tasks[j].head_node];
+
+            const double i_tildeu_tilde =
+                mcgrp.min_cost[mcgrp.inst_tasks[i_tilde].tail_node][mcgrp.inst_tasks[u_tilde].head_node];
+
+            //remove the original connections firstly
+            double base = -tu - mcgrp.inst_tasks[u].serv_cost - ui - mcgrp.inst_tasks[i].serv_cost - ij;
+
+            //add new connections secondly
+            //...t-i-u-j...
+            deltas[0] = ti + mcgrp.inst_tasks[i].serv_cost + iu + mcgrp.inst_tasks[u].serv_cost + uj;
+
+            //...t-i-u_tilde-j...
+            deltas[1] = ti + mcgrp.inst_tasks[i].serv_cost + iu_tilde + mcgrp.inst_tasks[u_tilde].serv_cost + u_tildej;
+
+            //...t-i_tilde-u-j...
+            deltas[2] = ti_tilde + mcgrp.inst_tasks[i_tilde].serv_cost + i_tildeu + mcgrp.inst_tasks[u].serv_cost + uj;
+
+            //...t-i_tilde-u_tilde-j...
+            deltas[3] = ti_tilde + mcgrp.inst_tasks[i_tilde].serv_cost + i_tildeu_tilde + mcgrp.inst_tasks[u_tilde].serv_cost + u_tildej;
+
+            int cases = 0;
+            double best_delta = deltas[0];
+            for (int cursor = 1; cursor < 4; cursor++) {
+                if (deltas[cursor] < best_delta) {
+                    cases = cursor;
+                    best_delta = deltas[cursor];
+                }
+            }
+
+            delta = best_delta + base;
+
+            //decide which task should be swapped finally
+            switch (cases) {
+                case 0:i = i;
+                    u = u;
+                    break;
+                case 1:i = i;
+                    u = u_tilde;
+                    break;
+                case 2:i = i_tilde;
+                    u = u;
+                    break;
+                case 3:i = i_tilde;
+                    u = u_tilde;
+                    break;
+                default:My_Assert(false, "unknown cases!");
+            }
+        }
+        else if (mcgrp.is_edge(i)){
+            const int i_tilde = mcgrp.inst_tasks[i].inverse;
+
+            const double tu = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[u].head_node];
+            const double ij = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[j].head_node];
+            const double iu = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[u].head_node];
+            const double ui = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double ti = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double uj = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[j].head_node];
+
+            const double ti_tilde = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[i_tilde].head_node];
+            const double i_tildeu = mcgrp.min_cost[mcgrp.inst_tasks[i_tilde].tail_node][mcgrp.inst_tasks[u].head_node];
+
+            //remove the original connections firstly
+            double base = -tu - mcgrp.inst_tasks[u].serv_cost - ui - mcgrp.inst_tasks[i].serv_cost - ij;
+
+            //add new connections secondly
+            //...t-i-u-j...
+            deltas[0] = ti + mcgrp.inst_tasks[i].serv_cost + iu + mcgrp.inst_tasks[u].serv_cost + uj;
+
+            //...t-i_tilde-u-j...
+            deltas[1] = ti_tilde + mcgrp.inst_tasks[i_tilde].serv_cost + i_tildeu + mcgrp.inst_tasks[u].serv_cost + uj;
+
+            int cases = 0;
+            double best_delta = deltas[0];
+            for (int cursor = 1; cursor < 2; cursor++) {
+                if (deltas[cursor] < best_delta) {
+                    cases = cursor;
+                    best_delta = deltas[cursor];
+                }
+            }
+
+            delta = best_delta + base;
+
+            //decide which task should be swapped finally
+            switch (cases) {
+                case 0:
+                    i = i;
+                    u = u;
+                    break;
+                case 1:
+                    i = i_tilde;
+                    u = u;
+                    break;
+                default:My_Assert(false, "unknown cases!");
+            }
+
+        }
+        else if (mcgrp.is_edge(u)){
+            const int u_tilde = mcgrp.inst_tasks[u].inverse;
+
+            const double tu = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[u].head_node];
+            const double ij = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[j].head_node];
+            const double iu = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[u].head_node];
+            const double ui = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double ti = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double uj = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[j].head_node];
+
+            const double iu_tilde = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[u_tilde].head_node];
+            const double u_tildej = mcgrp.min_cost[mcgrp.inst_tasks[u_tilde].tail_node][mcgrp.inst_tasks[j].head_node];
+
+            //remove the original connections firstly
+            double base = -tu - mcgrp.inst_tasks[u].serv_cost - ui - mcgrp.inst_tasks[i].serv_cost - ij;
+
+            //add new connections secondly
+            //...t-i-u-j...
+            deltas[0] = ti + mcgrp.inst_tasks[i].serv_cost + iu + mcgrp.inst_tasks[u].serv_cost + uj;
+
+            //...h-i-u_tilde-j...
+            deltas[1] = ti + mcgrp.inst_tasks[i].serv_cost + iu_tilde + mcgrp.inst_tasks[u_tilde].serv_cost + u_tildej;
+
+            int cases = 0;
+            double best_delta = deltas[0];
+            for (int cursor = 1; cursor < 2; cursor++) {
+                if (deltas[cursor] < best_delta) {
+                    cases = cursor;
+                    best_delta = deltas[cursor];
+                }
+            }
+
+            delta = best_delta + base;
+
+            //decide which task should be swapped finally
+            switch (cases) {
+                case 0:i = i;
+                    u = u;
+                    break;
+                case 1:i = i;
+                    u = u_tilde;
+                    break;
+                default:My_Assert(false, "unknown cases!");
+            }
+        }
+        else{
+            const double tu = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[u].head_node];
+            const double ij = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[j].head_node];
+            const double iu = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[u].head_node];
+            const double ui = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double ti = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[i].head_node];
+            const double uj = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[j].head_node];
+
+
+            //remove the original connections firstly
+            double base = -tu - mcgrp.inst_tasks[u].serv_cost - ui - mcgrp.inst_tasks[i].serv_cost - ij;
+
+            //add new connections secondly
+            //...t-i-u-j...
+            deltas[0] = ti + mcgrp.inst_tasks[i].serv_cost + iu + mcgrp.inst_tasks[u].serv_cost + uj;
+
+
+            double best_delta = deltas[0];
+
+            delta = best_delta + base;
+        }
+    }
+    else{
+        //...t-u-v...h-i-j...
+        // OR
+        //...h-i-j...t-u-v...
+        int u_tilde = u;
+        int i_tilde = i;
+        //Total four situations need to be considered here
+        if (mcgrp.is_edge(u)) {
+            u_tilde = mcgrp.inst_tasks[u].inverse;
+        }
+        if (mcgrp.is_edge(i)) {
+            i_tilde = mcgrp.inst_tasks[i].inverse;
+        }
+
+        const double tu = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[u].head_node];
+        const double uv = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[v].head_node];
+        const double hi = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[i].head_node];
+        const double ij = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[j].head_node];
+        const double ti = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[i].head_node];
+        const double iv = mcgrp.min_cost[mcgrp.inst_tasks[i].tail_node][mcgrp.inst_tasks[v].head_node];
+        const double hu = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[u].head_node];
+        const double uj = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[j].head_node];
+
+        const double ti_tilde = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[i_tilde].head_node];
+        const double i_tildev = mcgrp.min_cost[mcgrp.inst_tasks[i_tilde].tail_node][mcgrp.inst_tasks[v].head_node];
+
+        const double hu_tilde = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[u_tilde].head_node];
+        const double u_tildej = mcgrp.min_cost[mcgrp.inst_tasks[u_tilde].tail_node][mcgrp.inst_tasks[j].head_node];
+
+        u_delta = -tu - uv - mcgrp.inst_tasks[u].serv_cost;
+        if (ti + iv <= ti_tilde + i_tildev) {
+            u_delta = u_delta + ti + iv + mcgrp.inst_tasks[i].serv_cost;
+        }
+        else {
+            //choose its inverse
+            i = i_tilde;
+            u_delta = u_delta + ti_tilde + i_tildev + mcgrp.inst_tasks[i_tilde].serv_cost;
+        }
+
+        i_delta = -hi - ij - mcgrp.inst_tasks[i].serv_cost;
+        if (hu + uj <= hu_tilde + u_tildej) {
+            i_delta = i_delta + hu + uj + mcgrp.inst_tasks[u].serv_cost;
+        }
+        else {
+            //choose its inverse
+            u = u_tilde;
+            i_delta = i_delta + hu_tilde + u_tildej + mcgrp.inst_tasks[u_tilde].serv_cost;
+        }
+
+        delta = u_delta + i_delta;
+
+    }
+
+    vector<double> routes_length;
+    for(int route_id : ns.routes.activated_route_id){
+        double route_length = ns.routes[route_id]->length;
+        if(route_id == u_route){
+            route_length += u_delta;
+        }
+
+        if(route_id == i_route){
+            route_length += i_delta;
+        }
+        if(route_length != 0){
+            routes_length.push_back(route_length);
+        }
+    }
+
+    auto longest_route = max_element(std::begin(routes_length), std::end(routes_length));
+    auto shortest_route = min_element(std::begin(routes_length), std::end(routes_length));
+    move_result.new_balance = *longest_route - *shortest_route;
+
+    if(!try_to_replace(biobj,{ns.cur_solution_cost + delta, move_result.new_balance})){
+        move_result.reset();
+        return false;
+    }
+
+
+    move_result.choose_tasks(original_u, original_i);
+
+    move_result.move_arguments.push_back(original_u);
+    move_result.move_arguments.push_back(original_i);
+
+    move_result.total_number_of_routes = ns.routes.activated_route_id.size();
+
+    if (u_route == i_route) {
+
+        move_result.num_affected_routes = 1;
+        move_result.delta = delta;
+
+        move_result.route_id.push_back(u_route);
+
+        move_result.route_lens.push_back(ns.routes[u_route]->length + delta);
+
+        move_result.route_loads.push_back(ns.routes[u_route]->load);
+
+        move_result.route_custs_num.push_back(ns.routes[u_route]->num_customers);
+
+        move_result.new_total_route_length = ns.cur_solution_cost + move_result.delta;
+        move_result.move_arguments.push_back(u);
+        move_result.move_arguments.push_back(i);
+
+        move_result.vio_load_delta = vio_load_delta;
+
+        move_result.considerable = true;
+
+        return true;
+    }
+    else {
+        // Different routes
+        move_result.num_affected_routes = 2;
+        move_result.delta = delta;
+
+        move_result.route_id.push_back(u_route);
+        move_result.route_id.push_back(i_route);
+
+        move_result.route_lens.push_back(ns.routes[u_route]->length + u_delta);
+        move_result.route_lens.push_back(ns.routes[i_route]->length + i_delta);
+
+        int u_route_load = ns.routes[u_route]->load - mcgrp.inst_tasks[u].demand + mcgrp.inst_tasks[i].demand;
+        int i_route_load = ns.routes[i_route]->load - mcgrp.inst_tasks[i].demand + mcgrp.inst_tasks[u].demand;
+        move_result.route_loads.push_back(u_route_load);
+        move_result.route_loads.push_back(i_route_load);
+
+
+        move_result.route_custs_num.push_back(ns.routes[u_route]->num_customers);
+        move_result.route_custs_num.push_back(ns.routes[i_route]->num_customers);
+
+        move_result.new_total_route_length = ns.cur_solution_cost + move_result.delta;
+
+        move_result.move_arguments.push_back(u);
+        move_result.move_arguments.push_back(i);
+
+        move_result.vio_load_delta = vio_load_delta;
+
+        move_result.considerable = true;
+
+        return true;
+    }
+
+    My_Assert(false,"Cannot reach here!");
 }

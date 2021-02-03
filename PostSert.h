@@ -37,5 +37,7 @@ public:
  */
     bool considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int u, const int i);
 
+    bool bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, int u, const int i);
+
     void move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp);
 };

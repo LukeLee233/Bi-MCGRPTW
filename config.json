@@ -1,7 +1,7 @@
 {
     "pool_size": 10,
-    "evolve_steps": -1,
-    "phase_number": -1,
+    "evolve_steps": 1,
+    "phase_number": 1,
     "random_seed": 0,
     "neighbor_size": 25,
     "QNDF_weights": 0.6,

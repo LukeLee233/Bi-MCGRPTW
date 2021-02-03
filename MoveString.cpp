@@ -3,6 +3,9 @@
 #include "PostSert.h"
 #include "Presert.h"
 #include <algorithm>
+#include "biobj.h"
+
+extern class BIOBJ biobj;
 
 
 
@@ -17,7 +20,7 @@ bool MoveString::considerable_move(NeighBorSearch &ns,
     // task u cannot be dummy task
     My_Assert(u != DUMMY, "Move string cannot handle situation when u is dummy");
 
-    My_Assert(std::find(distrubance_seq.begin(), distrubance_seq.end(), DUMMY) == distrubance_seq.end(),
+    My_Assert(std::find(disturbance_seq.begin(), disturbance_seq.end(), DUMMY) == disturbance_seq.end(),
               "Disturbance sequence can't cross routes!");
 
 
@@ -34,8 +37,8 @@ bool MoveString::considerable_move(NeighBorSearch &ns,
 
     //of course, disturbance sequence can't has task u and v, is can't insert itself!
     //forbid overlap
-    My_Assert(find(distrubance_seq.begin(), distrubance_seq.end(), u) == distrubance_seq.end()
-    && find(distrubance_seq.begin(), distrubance_seq.end(), v) == distrubance_seq.end(),"overlapping!");
+    My_Assert(find(disturbance_seq.begin(), disturbance_seq.end(), u) == disturbance_seq.end()
+    && find(disturbance_seq.begin(), disturbance_seq.end(), v) == disturbance_seq.end(),"overlapping!");
 
 
 
@@ -331,7 +334,7 @@ bool PostMoveString::considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP 
 {
     // task u cannot be dummy task
     My_Assert(u>=1 && u<=mcgrp.actual_task_num,"Wrong task");
-    My_Assert(all_of(distrubance_seq.begin(),distrubance_seq.end(),[&](int i){return i>=1 && i<=mcgrp.actual_task_num;}),"Wrong task");
+    My_Assert(all_of(disturbance_seq.begin(),disturbance_seq.end(),[&](int i){return i>=1 && i<=mcgrp.actual_task_num;}),"Wrong task");
 
     if(u == ns.solution[disturbance_seq.back()]->next->ID){
         // Nothing to do
@@ -635,6 +638,192 @@ void PostMoveString::move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp)
     ns.search_step++;
 }
 
+bool PostMoveString::bi_considerable_move(HighSpeedNeighBorSearch &ns,
+                                          const MCGRP &mcgrp,
+                                          vector<int> disturbance_seq,
+                                          const int u)
+{
+    // task u cannot be dummy task
+    My_Assert(u>=1 && u<=mcgrp.actual_task_num,"Wrong task");
+    My_Assert(all_of(disturbance_seq.begin(),disturbance_seq.end(),[&](int i){return i>=1 && i<=mcgrp.actual_task_num;}),"Wrong task");
+
+    if(u == ns.solution[disturbance_seq.back()]->next->ID){
+        // Nothing to do
+        move_result.reset();
+        return false;
+    }
+
+    const int i_route = ns.solution[disturbance_seq.front()]->route_id;
+    const int u_route = ns.solution[u]->route_id;
+
+    // Check load feasibility easily
+    int load_delta = 0;
+    double vio_load_delta = 0;
+    //not the same route
+    if (i_route != u_route) {
+        for (auto task : disturbance_seq) {
+            load_delta += mcgrp.inst_tasks[task].demand;
+        }
+
+        if (ns.policy.has_rule(DELTA_ONLY)) {
+            if (ns.routes[u_route]->load + load_delta > mcgrp.capacity) {
+                move_result.reset();
+                return false;
+            }
+        }
+        else if (ns.policy.has_rule(FITNESS_ONLY)) {
+            //u_route vio-load calculate
+            if (ns.routes[u_route]->load + load_delta > mcgrp.capacity) {
+                //if insert task to route u and over load
+                if (ns.routes[u_route]->load >= mcgrp.capacity) {
+                    //if the route u already over loaded
+                    vio_load_delta += load_delta;
+                }
+                else {
+                    vio_load_delta += ns.routes[u_route]->load + load_delta - mcgrp.capacity;
+                }
+            }
+
+            //i_route vio-load calculate
+            if (ns.routes[i_route]->load > mcgrp.capacity) {
+                //if remove task from route i and over load
+                if (ns.routes[i_route]->load - load_delta >= mcgrp.capacity) {
+                    //if still over loaded
+                    vio_load_delta -= load_delta;
+                }
+                else {
+                    vio_load_delta -= (ns.routes[i_route]->load - mcgrp.capacity);
+                }
+            }
+        }
+    }
+
+
+
+    const int v = max(ns.solution[u]->next->ID, 0);
+
+    const int h = max(ns.solution[disturbance_seq.front()]->pre->ID, 0);
+    const int l = max(ns.solution[disturbance_seq.back()]->next->ID, 0);
+
+    const double hi = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[disturbance_seq.front()].head_node];
+    const double kl = mcgrp.min_cost[mcgrp.inst_tasks[disturbance_seq.back()].tail_node][mcgrp.inst_tasks[l].head_node];
+    const double hl = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[l].head_node];
+
+    double i_route_length_delta = hl - (hi + kl);
+    for (int cursor = 0; cursor < disturbance_seq.size() - 1; cursor++) {
+        i_route_length_delta -=
+            mcgrp.min_cost[mcgrp.inst_tasks[disturbance_seq[cursor]].tail_node][mcgrp.inst_tasks[disturbance_seq[cursor
+                + 1]].head_node];
+        i_route_length_delta -= mcgrp.inst_tasks[disturbance_seq[cursor]].serv_cost;
+    }
+    i_route_length_delta -= mcgrp.inst_tasks[disturbance_seq.back()].serv_cost;
+
+
+    const double uv = mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[v].head_node];
+    double u_route_length_delta = -uv;
+
+    for (auto cursor = 0; cursor < disturbance_seq.size() - 1; cursor++) {
+        u_route_length_delta +=
+            mcgrp.min_cost[mcgrp.inst_tasks[disturbance_seq[cursor]].tail_node][mcgrp.inst_tasks[disturbance_seq[
+                cursor + 1]].head_node];
+        u_route_length_delta += mcgrp.inst_tasks[disturbance_seq[cursor]].serv_cost;
+    }
+    u_route_length_delta += mcgrp.inst_tasks[disturbance_seq.back()].serv_cost;
+    //handle ends
+    u_route_length_delta +=
+        mcgrp.min_cost[mcgrp.inst_tasks[u].tail_node][mcgrp.inst_tasks[disturbance_seq.front()].head_node];
+    u_route_length_delta +=
+        mcgrp.min_cost[mcgrp.inst_tasks[disturbance_seq.back()].tail_node][mcgrp.inst_tasks[v].head_node];
+
+
+    move_result.choose_tasks(disturbance_seq.front(), u);
+
+    move_result.move_arguments = disturbance_seq;
+    move_result.move_arguments.push_back(u);
+
+    // Check if we need to reduce the # of routes here
+    const int start_i = ns.routes[i_route]->start;
+    const int end_i = ns.routes[i_route]->end;
+    if (start_i == disturbance_seq.front() && end_i == disturbance_seq.back())
+        move_result.total_number_of_routes = ns.routes.activated_route_id.size() - 1;
+    else
+        move_result.total_number_of_routes = ns.routes.activated_route_id.size();
+
+    vector<double> routes_length;
+    for(int route_id : ns.routes.activated_route_id){
+        double route_length = ns.routes[route_id]->length;
+        if(route_id == u_route){
+            route_length += u_route_length_delta;
+        }
+
+        if(route_id == i_route){
+            route_length += i_route_length_delta;
+        }
+        if(route_length != 0){
+            routes_length.push_back(route_length);
+        }
+    }
+
+    auto longest_route = max_element(std::begin(routes_length), std::end(routes_length));
+    auto shortest_route = min_element(std::begin(routes_length), std::end(routes_length));
+    move_result.new_balance = *longest_route - *shortest_route;
+
+    if(!try_to_replace(biobj,{ns.cur_solution_cost + u_route_length_delta + i_route_length_delta, move_result.new_balance})){
+        move_result.reset();
+        return false;
+    }
+
+
+    if (i_route == u_route) {
+
+        move_result.num_affected_routes = 1;
+
+        move_result.route_id.push_back(i_route);
+
+        move_result.delta = u_route_length_delta + i_route_length_delta;
+        move_result.route_lens.push_back(ns.routes[i_route]->length + move_result.delta);
+
+        move_result.route_loads.push_back(ns.routes[i_route]->load);
+
+        move_result.route_custs_num.push_back(ns.routes[i_route]->num_customers);
+
+        move_result.new_total_route_length = ns.cur_solution_cost + move_result.delta;
+
+        move_result.vio_load_delta = vio_load_delta;
+
+        move_result.considerable = true;
+
+        return true;
+    }
+    else {
+        // Different routes!
+        move_result.num_affected_routes = 2;
+        move_result.route_id.push_back(i_route);
+        move_result.route_id.push_back(u_route);
+
+        move_result.delta = u_route_length_delta + i_route_length_delta;
+
+        move_result.route_lens.push_back(ns.routes[i_route]->length + i_route_length_delta);
+        move_result.route_lens.push_back(ns.routes[u_route]->length + u_route_length_delta);
+
+        move_result.route_loads.push_back(ns.routes[i_route]->load - load_delta);
+        move_result.route_loads.push_back(ns.routes[u_route]->load + load_delta);
+
+        move_result.route_custs_num.push_back(ns.routes[i_route]->num_customers - disturbance_seq.size());
+        move_result.route_custs_num.push_back(ns.routes[u_route]->num_customers + disturbance_seq.size());
+
+        move_result.new_total_route_length = ns.cur_solution_cost + move_result.delta;
+
+        move_result.vio_load_delta = vio_load_delta;
+
+        move_result.considerable = true;
+
+        return true;
+    }
+
+    My_Assert(false,"Cannot reach here!");
+}
+
 //---------------------------------------------------------------------------------------------
 
 
@@ -804,7 +993,7 @@ bool PreMoveString::considerable_move(HighSpeedNeighBorSearch &ns, const class M
 
 void PreMoveString::move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp)
 {
-    DEBUG_PRINT("execute a double insert:postsert move");
+    DEBUG_PRINT("execute a double insert:presert move");
     My_Assert(move_result.considerable,"Invalid predictions");
 
     //extract move arguments
@@ -949,4 +1138,193 @@ void PreMoveString::move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp)
 
     move_result.reset();
     ns.search_step++;
+}
+
+
+bool PreMoveString::bi_considerable_move(HighSpeedNeighBorSearch &ns,
+                                         const MCGRP &mcgrp,
+                                         vector<int> disturbance_seq,
+                                         const int u)
+{
+    // task u cannot be dummy task
+    My_Assert(u >= 1 && u <= mcgrp.actual_task_num,"Wrong task");
+    My_Assert(all_of(disturbance_seq.begin(), disturbance_seq.end(), [&](int i){return i>=1 && i<=mcgrp.actual_task_num;}), "Wrong task");
+
+    if(u == ns.solution[disturbance_seq.front()]->pre->ID){
+        // Nothing to do
+        move_result.reset();
+        return false;
+    }
+
+    const int i_route = ns.solution[disturbance_seq.front()]->route_id;
+    const int u_route = ns.solution[u]->route_id;
+
+    // Check load feasibility easily
+    int load_delta = 0;
+    double vio_load_delta = 0;
+    //not the same route
+    if (i_route != u_route) {
+        for (auto task : disturbance_seq) {
+            load_delta += mcgrp.inst_tasks[task].demand;
+        }
+
+        if (ns.policy.has_rule(DELTA_ONLY)) {
+            if (ns.routes[u_route]->load + load_delta > mcgrp.capacity) {
+                move_result.reset();
+                return false;
+            }
+        }
+        else if (ns.policy.has_rule(FITNESS_ONLY)) {
+            //u_route vio-load calculate
+            if (ns.routes[u_route]->load + load_delta > mcgrp.capacity) {
+                //if insert task to route u and over load
+                if (ns.routes[u_route]->load >= mcgrp.capacity) {
+                    //if the route u already over loaded
+                    vio_load_delta += load_delta;
+                }
+                else {
+                    vio_load_delta += ns.routes[u_route]->load + load_delta - mcgrp.capacity;
+                }
+            }
+
+            //i_route vio-load calculate
+            if (ns.routes[i_route]->load > mcgrp.capacity) {
+                //if remove task from route i and over load
+                if (ns.routes[i_route]->load - load_delta >= mcgrp.capacity) {
+                    //if still over loaded
+                    vio_load_delta -= load_delta;
+                }
+                else {
+                    vio_load_delta -= (ns.routes[i_route]->load - mcgrp.capacity);
+                }
+            }
+        }
+    }
+
+
+
+    const int t = max(ns.solution[u]->pre->ID, 0);
+
+    const int h = max(ns.solution[disturbance_seq.front()]->pre->ID, 0);
+    const int l = max(ns.solution[disturbance_seq.back()]->next->ID, 0);
+
+    const double hi = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[disturbance_seq.front()].head_node];
+    const double kl = mcgrp.min_cost[mcgrp.inst_tasks[disturbance_seq.back()].tail_node][mcgrp.inst_tasks[l].head_node];
+    const double hl = mcgrp.min_cost[mcgrp.inst_tasks[h].tail_node][mcgrp.inst_tasks[l].head_node];
+
+    double i_route_length_delta = hl - (hi + kl);
+
+    for (int cursor = 0; cursor < disturbance_seq.size() - 1; cursor++) {
+        i_route_length_delta -=
+            mcgrp.min_cost[mcgrp.inst_tasks[disturbance_seq[cursor]].tail_node][mcgrp.inst_tasks[disturbance_seq[cursor
+                + 1]].head_node];
+        i_route_length_delta -= mcgrp.inst_tasks[disturbance_seq[cursor]].serv_cost;
+    }
+    i_route_length_delta -= mcgrp.inst_tasks[disturbance_seq.back()].serv_cost;
+
+
+    const double tu = mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[u].head_node];
+    double u_route_length_delta = -tu;
+
+    for (auto cursor = 0; cursor < disturbance_seq.size() - 1; cursor++) {
+        u_route_length_delta +=
+            mcgrp.min_cost[mcgrp.inst_tasks[disturbance_seq[cursor]].tail_node][mcgrp.inst_tasks[disturbance_seq[
+                cursor + 1]].head_node];
+        u_route_length_delta += mcgrp.inst_tasks[disturbance_seq[cursor]].serv_cost;
+    }
+
+    u_route_length_delta += mcgrp.inst_tasks[disturbance_seq.back()].serv_cost;
+    //handle ends
+    u_route_length_delta +=
+        mcgrp.min_cost[mcgrp.inst_tasks[t].tail_node][mcgrp.inst_tasks[disturbance_seq.front()].head_node];
+    u_route_length_delta +=
+        mcgrp.min_cost[mcgrp.inst_tasks[disturbance_seq.back()].tail_node][mcgrp.inst_tasks[u].head_node];
+
+
+    move_result.choose_tasks(disturbance_seq.front(), u);
+
+    move_result.move_arguments = disturbance_seq;
+    move_result.move_arguments.push_back(u);
+
+
+    // Check if we need to reduce the # of routes here
+    const int start_i = ns.routes[i_route]->start;
+    const int end_i = ns.routes[i_route]->end;
+    if (start_i == disturbance_seq.front() && end_i == disturbance_seq.back())
+        move_result.total_number_of_routes = ns.routes.activated_route_id.size() - 1;
+    else
+        move_result.total_number_of_routes = ns.routes.activated_route_id.size();
+
+    vector<double> routes_length;
+    for(int route_id : ns.routes.activated_route_id){
+        double route_length = ns.routes[route_id]->length;
+        if(route_id == u_route){
+            route_length += u_route_length_delta;
+        }
+
+        if(route_id == i_route){
+            route_length += i_route_length_delta;
+        }
+        if(route_length != 0){
+            routes_length.push_back(route_length);
+        }
+    }
+
+    auto longest_route = max_element(std::begin(routes_length), std::end(routes_length));
+    auto shortest_route = min_element(std::begin(routes_length), std::end(routes_length));
+    move_result.new_balance = *longest_route - *shortest_route;
+
+    if(!try_to_replace(biobj,{ns.cur_solution_cost + u_route_length_delta + i_route_length_delta, move_result.new_balance})){
+        move_result.reset();
+        return false;
+    }
+
+    if (i_route == u_route) {
+
+        move_result.num_affected_routes = 1;
+
+        move_result.route_id.push_back(i_route);
+
+        move_result.delta = u_route_length_delta + i_route_length_delta;
+        move_result.route_lens.push_back(ns.routes[i_route]->length + move_result.delta);
+
+        move_result.route_loads.push_back(ns.routes[i_route]->load);
+
+        move_result.route_custs_num.push_back(ns.routes[i_route]->num_customers);
+
+        move_result.new_total_route_length = ns.cur_solution_cost + move_result.delta;
+
+        move_result.vio_load_delta = vio_load_delta;
+
+        move_result.considerable = true;
+
+        return true;
+    }
+    else {
+        // Different routes!
+        move_result.num_affected_routes = 2;
+        move_result.route_id.push_back(i_route);
+        move_result.route_id.push_back(u_route);
+
+        move_result.delta = u_route_length_delta + i_route_length_delta;
+
+        move_result.route_lens.push_back(ns.routes[i_route]->length + i_route_length_delta);
+        move_result.route_lens.push_back(ns.routes[u_route]->length + u_route_length_delta);
+
+        move_result.route_loads.push_back(ns.routes[i_route]->load - load_delta);
+        move_result.route_loads.push_back(ns.routes[u_route]->load + load_delta);
+
+        move_result.route_custs_num.push_back(ns.routes[i_route]->num_customers - disturbance_seq.size());
+        move_result.route_custs_num.push_back(ns.routes[u_route]->num_customers + disturbance_seq.size());
+
+        move_result.new_total_route_length = ns.cur_solution_cost + move_result.delta;
+
+        move_result.vio_load_delta = vio_load_delta;
+
+        move_result.considerable = true;
+
+        return true;
+    }
+
+    My_Assert(false,"Cannot reach here!");
 }

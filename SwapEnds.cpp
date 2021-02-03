@@ -1,5 +1,8 @@
 #include "SwapEnds.h"
 #include <algorithm>
+#include "biobj.h"
+
+extern class BIOBJ biobj;
 
 using namespace std;
 
@@ -857,7 +860,8 @@ RouteSegment get_segment_info(const MCGRP &mcgrp,HighSpeedNeighBorSearch &ns,con
 }
 
 
-bool NewSwapEnds::considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, const int chosen_task, const int neighbor_task,const int chosen_route,const int neighbor_route){
+bool NewSwapEnds::considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp, const int chosen_task, const int neighbor_task,const int chosen_route,const int neighbor_route)
+{
     /// Example: ( a & v input): VRP_DEPOT-i-a-b-j-k-l-VRP_DEPOT and VRP_DEPOT-t-u-v-w-x-y-z-VRP_DEPOT becomes
     /// VRP_DEPOT-i-a-w-x-y-z-VRP_DEPOT and VRP_DEPOT-t-u-v-b-j-k-l-VRP_DEPOT
 
@@ -1380,4 +1384,265 @@ void NewSwapEnds::move(HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp){
 
     move_result.reset();
     ns.search_step++;
+}
+
+
+bool NewSwapEnds::bi_considerable_move(HighSpeedNeighBorSearch &ns,
+                                       const MCGRP &mcgrp,
+                                       const int chosen_task,
+                                       const int neighbor_task,
+                                       const int chosen_route,
+                                       const int neighbor_route)
+{
+    /// Example: ( a & v input): VRP_DEPOT-i-a-b-j-k-l-VRP_DEPOT and VRP_DEPOT-t-u-v-w-x-y-z-VRP_DEPOT becomes
+    /// VRP_DEPOT-i-a-w-x-y-z-VRP_DEPOT and VRP_DEPOT-t-u-v-b-j-k-l-VRP_DEPOT
+
+    move_result.reset();
+
+    const int a_route = chosen_route;
+    const int v_route = neighbor_route;
+
+    My_Assert(a_route != v_route,"swap ends called with a and v in same route!");
+
+    //get sequence that need to be swap
+    RouteSegment seg_after_a = get_segment_info(mcgrp,ns,chosen_task);
+    RouteSegment seg_after_v = get_segment_info(mcgrp,ns, neighbor_task);
+
+
+    const auto a_load_delta = -seg_after_a.load + seg_after_v.load;
+    const auto v_load_delta = -seg_after_v.load + seg_after_a.load;
+
+    //handle load constraint
+    double vio_load_delta = 0;
+    if (ns.policy.has_rule(DELTA_ONLY)) {
+        if (ns.routes[a_route]->load + a_load_delta > mcgrp.capacity
+            || ns.routes[v_route]->load + v_load_delta > mcgrp.capacity) {
+            return false;
+        }
+    }
+    else if (ns.policy.has_rule(FITNESS_ONLY)) {
+        My_Assert(v_load_delta == -a_load_delta,"Wrong arguments");
+
+        if(a_load_delta >= 0){
+            //a_route vio-load calculate
+            if (ns.routes[a_route]->load + a_load_delta > mcgrp.capacity) {
+                //if insert task to route a and over load
+                if (ns.routes[a_route]->load >= mcgrp.capacity) {
+                    //if the route a already over loaded
+                    vio_load_delta += a_load_delta;
+                }
+                else {
+                    vio_load_delta += ns.routes[a_route]->load + a_load_delta - mcgrp.capacity;
+                }
+            }
+
+            My_Assert(v_load_delta <= 0,"Wrong arguments!");
+            if (ns.routes[v_route]->load > mcgrp.capacity) {
+                //if insert task to route a and over load
+                if (ns.routes[v_route]->load + v_load_delta >= mcgrp.capacity) {
+                    //if the route v still over loaded
+                    vio_load_delta += v_load_delta;
+                }
+                else {
+                    vio_load_delta -= (ns.routes[v_route]->load - mcgrp.capacity);
+                }
+            }
+        }
+        else{
+            if (ns.routes[a_route]->load > mcgrp.capacity) {
+                //if insert task to route a and over load
+                if (ns.routes[a_route]->load + a_load_delta >= mcgrp.capacity) {
+                    //if the route v still over loaded
+                    vio_load_delta += a_load_delta;
+                }
+                else {
+                    vio_load_delta -= (ns.routes[a_route]->load - mcgrp.capacity);
+                }
+            }
+
+            My_Assert(v_load_delta >= 0,"Wrong arguments!");
+            //v_route vio-load calculate
+            if (ns.routes[v_route]->load + v_load_delta > mcgrp.capacity) {
+                //if insert task to route v and over load
+                if (ns.routes[v_route]->load >= mcgrp.capacity) {
+                    //if the route v already over loaded
+                    vio_load_delta += v_load_delta;
+                }
+                else {
+                    vio_load_delta += ns.routes[v_route]->load + v_load_delta - mcgrp.capacity;
+                }
+            }
+        }
+
+    }
+
+
+    double delta;
+
+    //a can be dummy and b can be dummy too
+    const int a = max(chosen_task,0);
+    const int v = max(neighbor_task,0);
+
+    if(seg_after_a.num_custs == 0 && seg_after_v.num_custs == 0){
+        //means no actual move happens
+        //...-a-[]-0
+        //...-v-[]-0
+        return false;
+    }
+    else if (seg_after_a.num_custs == 0){
+        //a segment is empty
+        //0-a-[]-0
+        //0-v-[w]-0
+        My_Assert(v_route == ns.solution[seg_after_v.segment_start]->route_id,"Wrong routes");
+        const int w = max(ns.solution[neighbor_task]->next->ID, 0);
+
+        const auto vw = mcgrp.min_cost[mcgrp.inst_tasks[v].tail_node][mcgrp.inst_tasks[w].head_node];
+        const auto aw = mcgrp.min_cost[mcgrp.inst_tasks[a].tail_node][mcgrp.inst_tasks[w].head_node];
+
+        const auto a_dummy = mcgrp.min_cost[mcgrp.inst_tasks[a].tail_node][mcgrp.inst_tasks[DUMMY].head_node];
+        const auto v_dummy = mcgrp.min_cost[mcgrp.inst_tasks[v].tail_node][mcgrp.inst_tasks[DUMMY].head_node];
+
+        delta = - a_dummy + aw - vw  + v_dummy;
+
+        const auto seg_after_v_dummy = mcgrp.min_cost[mcgrp.inst_tasks[seg_after_v.segment_end].tail_node][mcgrp.inst_tasks[DUMMY].head_node];
+
+        auto new_a_len = ns.routes[a_route]->length - a_dummy + aw + seg_after_v.len + seg_after_v_dummy;
+        auto new_v_len = ns.routes[v_route]->length - vw - seg_after_v.len - seg_after_v_dummy + v_dummy;
+        move_result.route_lens.push_back(new_a_len);
+        move_result.route_lens.push_back(new_v_len);
+
+        move_result.seq1_cus_num = seg_after_a.num_custs;
+        move_result.seq2_cus_num = seg_after_v.num_custs;
+    }
+    else if (seg_after_v.num_custs == 0){
+        //v segment is empty
+        //0-a-[b]-0
+        //0-v-[]-0
+        My_Assert(a_route == ns.solution[seg_after_a.segment_start]->route_id,"Wrong routes");
+
+        const int b = max(ns.solution[chosen_task]->next->ID, 0);
+
+        const auto ab = mcgrp.min_cost[mcgrp.inst_tasks[a].tail_node][mcgrp.inst_tasks[b].head_node];
+        const auto vb = mcgrp.min_cost[mcgrp.inst_tasks[v].tail_node][mcgrp.inst_tasks[b].head_node];
+
+        const auto a_dummy = mcgrp.min_cost[mcgrp.inst_tasks[a].tail_node][mcgrp.inst_tasks[DUMMY].head_node];
+        const auto v_dummy = mcgrp.min_cost[mcgrp.inst_tasks[v].tail_node][mcgrp.inst_tasks[DUMMY].head_node];
+
+        delta = - v_dummy + vb - ab + a_dummy;
+
+        const auto seg_after_a_dummy = mcgrp.min_cost[mcgrp.inst_tasks[seg_after_a.segment_end].tail_node][mcgrp.inst_tasks[DUMMY].head_node];
+
+        auto new_a_len = ns.routes[a_route]->length - ab - seg_after_a.len - seg_after_a_dummy + a_dummy;
+        auto new_v_len = ns.routes[v_route]->length - v_dummy + vb + seg_after_a.len + seg_after_a_dummy;
+        move_result.route_lens.push_back(new_a_len);
+        move_result.route_lens.push_back(new_v_len);
+
+        move_result.seq1_cus_num = seg_after_a.num_custs;
+        move_result.seq2_cus_num = seg_after_v.num_custs;
+    }
+    else{
+        //normal case,two segments are not empty
+        //0-a-[b]-0
+        //0-v-[w]-0
+        My_Assert(a_route == ns.solution[seg_after_a.segment_start]->route_id,"Wrong routes");
+        My_Assert(v_route == ns.solution[seg_after_v.segment_start]->route_id,"Wrong routes");
+
+        const int b = max(ns.solution[chosen_task]->next->ID, 0);
+        const int w = max(ns.solution[neighbor_task]->next->ID, 0);
+
+        const auto ab = mcgrp.min_cost[mcgrp.inst_tasks[a].tail_node][mcgrp.inst_tasks[b].head_node];
+        const auto vw = mcgrp.min_cost[mcgrp.inst_tasks[v].tail_node][mcgrp.inst_tasks[w].head_node];
+        const auto aw = mcgrp.min_cost[mcgrp.inst_tasks[a].tail_node][mcgrp.inst_tasks[w].head_node];
+        const auto vb = mcgrp.min_cost[mcgrp.inst_tasks[v].tail_node][mcgrp.inst_tasks[b].head_node];
+
+        delta = - ab - vw + aw + vb;
+
+        const auto seg_after_a_dummy = mcgrp.min_cost[mcgrp.inst_tasks[seg_after_a.segment_end].tail_node][mcgrp.inst_tasks[DUMMY].head_node];
+        const auto seg_after_v_dummy = mcgrp.min_cost[mcgrp.inst_tasks[seg_after_v.segment_end].tail_node][mcgrp.inst_tasks[DUMMY].head_node];
+
+        auto new_a_len = ns.routes[a_route]->length - ab - seg_after_a.len - seg_after_a_dummy  + aw + seg_after_v.len + seg_after_v_dummy;
+        auto new_v_len = ns.routes[v_route]->length - vw - seg_after_v.len - seg_after_v_dummy  + vb + seg_after_a.len + seg_after_a_dummy;
+        move_result.route_lens.push_back(new_a_len);
+        move_result.route_lens.push_back(new_v_len);
+
+        move_result.seq1_cus_num = seg_after_a.num_custs;
+        move_result.seq2_cus_num = seg_after_v.num_custs;
+    }
+
+    move_result.delta = delta;
+
+    vector<double> routes_length;
+    for(int route_id : ns.routes.activated_route_id){
+        double route_length = ns.routes[route_id]->length;
+        if(route_id == a_route || route_id == v_route){
+            continue;
+        }
+
+        if(route_length != 0){
+            routes_length.push_back(route_length);
+        }
+    }
+
+    for(auto route_length : move_result.route_lens){
+        if(route_length != 0)
+            routes_length.push_back(route_length);
+    }
+
+    auto longest_route = max_element(std::begin(routes_length), std::end(routes_length));
+    auto shortest_route = min_element(std::begin(routes_length), std::end(routes_length));
+    move_result.new_balance = *longest_route - *shortest_route;
+
+    if(!try_to_replace(biobj,{ns.cur_solution_cost + delta, move_result.new_balance})){
+        move_result.reset();
+        return false;
+    }
+
+    move_result.num_affected_routes = 2;
+    My_Assert(move_result.route_id.empty(),"Wrong statement");
+    move_result.route_id.push_back(a_route);
+    move_result.route_id.push_back(v_route);
+
+
+    auto new_a_load = ns.routes[a_route]->load + a_load_delta;
+    auto new_v_load = ns.routes[v_route]->load + v_load_delta;
+    move_result.route_loads.push_back(new_a_load);
+    move_result.route_loads.push_back(new_v_load);
+
+    auto new_a_custs_num = ns.routes[a_route]->num_customers - seg_after_a.num_custs + seg_after_v.num_custs;
+    auto new_v_custs_num = ns.routes[v_route]->num_customers - seg_after_v.num_custs + seg_after_a.num_custs;
+    move_result.route_custs_num.push_back(new_a_custs_num);
+    move_result.route_custs_num.push_back(new_v_custs_num);
+
+    move_result.new_total_route_length = ns.cur_solution_cost + move_result.delta;
+
+    move_result.total_number_of_routes = ns.routes.activated_route_id.size();
+
+    vector<int> a_seq;
+    a_seq.push_back(chosen_task);
+    int cur_task = ns.solution[chosen_task]->ID;
+    for(auto i = 0;i < seg_after_a.num_custs;i++) {
+        cur_task = ns.solution[cur_task]->next->ID;
+        a_seq.push_back(cur_task);
+    }
+
+    vector<int> v_seq;
+    v_seq.push_back(neighbor_task);
+    cur_task = ns.solution[neighbor_task]->ID;
+    for(auto i = 0;i < seg_after_v.num_custs;i++) {
+        cur_task = ns.solution[cur_task]->next->ID;
+        v_seq.push_back(cur_task);
+    }
+
+
+    move_result.move_arguments = a_seq;
+    move_result.move_arguments.insert(move_result.move_arguments.end(),v_seq.begin(),v_seq.end());
+
+    move_result.task1 = chosen_task;
+    move_result.task2 = neighbor_task;
+
+    move_result.vio_load_delta = vio_load_delta;
+
+    move_result.considerable = true;
+
+    return true;
 }
