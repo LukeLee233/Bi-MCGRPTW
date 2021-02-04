@@ -211,27 +211,29 @@ int main(int argc, char *argv[])
 
             /*----------------------------------------------------------*/
             cout << "Begin search..." << endl;
-            biobj.init_population(Mixed_Instance);
-            biobj.initialize_fitness();
-            for(auto &member : biobj.members){
-                cout<< member.objectives.first << " "<< member.objectives.second<<endl;
-            }
-            cout << endl;
-            biobj.search(Mixed_Instance);
-            cout << "Finish " << start_seed - random_seed << "th search, spent: "
-                 << get_time_difference(phase_start_time,cur_time) << 's' << endl;
-
-
             log_out.open(date_folder + "/" + file_name, ios::out);
-            for(auto &member : biobj.members){
-                string s = to_string(member.objectives.first) + " " + to_string(member.objectives.second);
-                print(cout, log_out, s);
+            for(int epoch = 0; epoch < 20;epoch++){
+                biobj.init_population(Mixed_Instance);
+                biobj.initialize_fitness();
+                for(auto &member : biobj.members){
+                    cout<< member.objectives.first << " "<< member.objectives.second<<endl;
+                }
+                cout << endl;
+                biobj.search(Mixed_Instance);
+                cout << "Finish " << start_seed - random_seed << "th search, spent: "
+                     << get_time_difference(phase_start_time,cur_time) << 's' << endl;
+
+
+                for(auto &member : biobj.members){
+                    string s = to_string(member.objectives.first) + " " + to_string(member.objectives.second);
+                    print(cout, log_out, s);
+                }
+                print(cout, log_out, "");
+                biobj.clear();
             }
-            print(cout, log_out, "\n");
+
             log_out.close();
 
-
-            biobj.clear();
         }
     }
 

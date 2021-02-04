@@ -10,7 +10,7 @@
 
 using namespace std;
 
-bool sortbysec(const pair<int,double> &a,
+bool sortbyfirst(const pair<int,double> &a,
                const pair<int,double> &b);
 
 
@@ -20,6 +20,7 @@ public:
         bool tried = false;
         vector<int> solution;   // zero as delimiter
         double fitness = DBL_MAX;
+        bool belong_to_dominating = false;
         pair<double,double> objectives;
         pair<double,double> normalized_objectives;
 
@@ -30,14 +31,24 @@ public:
         {}
     };
 
-    int upper_bound;
+    int max_members_size;
     vector<UNIT> members;
     vector<int> member_ids;
+    pair<double, double> reference_point{1.1,1.1};
+    pair<double, double> dominated_benchmark{DBL_MAX,DBL_MAX};
+
+    static double hyper_volume(const pair<double,double>& lb, const pair<double,double>& ru);
+
     double min_o1 = DBL_MAX;
     double min_o2 = DBL_MAX;
 
     double max_o1 = DBL_MIN;
     double max_o2 = DBL_MIN;
+
+    vector<pair<double, double>> points_list;
+
+    void collect_dominating_point(const pair<double,double>& point);
+    void collect_non_dominated_neighbor(const pair<double,double>& point);
 
     void update_bound(pair<double, double> objective){
         update_o1_bound(objective.first);
@@ -60,9 +71,40 @@ public:
         unit.normalized_objectives = {normalized_o1,normalized_o2};
     }
 
-    static double epsilon_I(const UNIT& m1,const UNIT& m2){
-        return max(m1.normalized_objectives.first - m2.normalized_objectives.first,
-                   m1.normalized_objectives.second - m2.normalized_objectives.second);
+    void init_dominated_info(){
+        dominated_benchmark = {DBL_MAX,DBL_MAX};
+        for(const auto &member: members){
+            if(member.normalized_objectives.first < dominated_benchmark.first && member.normalized_objectives.second < dominated_benchmark.second){
+                dominated_benchmark = member.normalized_objectives;
+            }
+        }
+
+        for(auto& member: members){
+            if(member.normalized_objectives.first == dominated_benchmark.first && member.normalized_objectives.second == dominated_benchmark.second){
+                member.belong_to_dominating = true;
+            }
+            else if(member.normalized_objectives.first >= dominated_benchmark.first && member.normalized_objectives.second >= dominated_benchmark.second){
+                member.belong_to_dominating = false;
+            }else{
+                member.belong_to_dominating = true;
+            }
+        }
+    }
+
+    vector<int> locate_member(const pair<double, double>& point){
+        if(point == reference_point){
+            return {-1};
+        }
+
+        vector<int> res;
+
+        for(int i = 0 ; i< members.size();i++){
+            if(point == members[i].normalized_objectives){
+                res.push_back(i);
+            }
+        }
+
+        return res;
     }
 
     void initialize_fitness(){
@@ -70,61 +112,27 @@ public:
         for(auto& member: members)
             normalize(member);
 
-        for(int i = 0;i < members.size();i++) {
+        init_dominated_info();
 
-            members[i].fitness = 0;
-            for (int j = 0; j < members.size(); j++) {
-                if (i == j) continue;
+        for(auto& member:members) {
+            // two cases
+            if(member.belong_to_dominating){
+                collect_non_dominated_neighbor(member.normalized_objectives);
+                member.fitness = hyper_volume(member.normalized_objectives,{points_list[1].first,points_list[0].second});
+            }
+            else{
+                collect_dominating_point(member.normalized_objectives);
+                double max_val = 0;
+                for(const auto& point : points_list){
+                    max_val = max(max_val,hyper_volume(point,member.normalized_objectives));
+                }
 
-                members[i].fitness += epsilon_I(members[j],members[i]);
+                member.fitness = - max_val;
             }
         }
-
     }
 
-    bool update_population(UNIT& unit){
-        update_bound(unit.objectives);
-        normalize(unit);
-
-        for(auto member: members){
-            normalize(member);
-        }
-
-        // calculate fitness
-        unit.fitness = 0;
-        for(const auto & member : members){
-            unit.fitness += epsilon_I(member,unit);
-        }
-
-        pair<int,double> minimum_member{-1,DBL_MAX};
-        for(int i = 0; i< members.size();i++){
-            members[i].fitness += epsilon_I(unit,members[i]);
-            if(members[i].fitness < minimum_member.second){
-                minimum_member.first = i;
-                minimum_member.second = members[i].fitness;
-            }
-        }
-
-        // preserve population
-        if(unit.fitness < minimum_member.second){
-            for(auto& member:members){
-                member.fitness -= epsilon_I(unit,member);
-            }
-
-            return false;
-        }
-        else{
-            unit.fitness -= epsilon_I(members[minimum_member.first],unit);
-            for(auto & member: members){
-                member.fitness -= epsilon_I(members[minimum_member.first],member);
-            }
-
-            members[minimum_member.first] = unit;
-            return true;
-        }
-
-    }
-
+    bool update_population(UNIT& unit);
 
 
     void init_population(const MCGRP &mcgrp);
@@ -136,9 +144,9 @@ public:
     void search(const MCGRP &mcgrp);
 
     explicit BIOBJ(int upperBound)
-        : upper_bound(upperBound)
+        : max_members_size(upperBound)
     {
-        for(int i = 0; i < upper_bound;i++){
+        for(int i = 0; i < max_members_size; i++){
             member_ids.push_back(i);
         }
     }
