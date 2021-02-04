@@ -15,36 +15,6 @@ bool sortbysec(const pair<int,double> &a,
     return (a.second < b.second);
 }
 
-bool try_to_replace(BIOBJ &biobj, pair<double, double> new_objectives){
-    biobj.update_bound(new_objectives);
-
-    BIOBJ::UNIT unit({},new_objectives);
-    biobj.normalize(unit);
-
-    unit.fitness = 0;
-    for(const auto & member : biobj.members){
-        unit.fitness += max(unit.normalized_objectives.first - member.normalized_objectives.first,
-                            unit.normalized_objectives.second - member.normalized_objectives.second);
-    }
-
-    vector<double> new_fitness;
-    for(const auto & member:biobj.members){
-        new_fitness.emplace_back(member.fitness + max(member.normalized_objectives.first - unit.normalized_objectives.first,
-                                                      member.normalized_objectives.second - unit.normalized_objectives.second));
-
-    }
-
-    sort(new_fitness.begin(),new_fitness.end());
-
-    if(unit.fitness > new_fitness[0]){
-        return true;
-    }
-    else{
-        return false;
-    }
-
-}
-
 void BIOBJ::init_population(const MCGRP &mcgrp)
 {
     cout << "Initialization pool...\n";
@@ -70,50 +40,46 @@ void BIOBJ::init_population(const MCGRP &mcgrp)
 
         try_count++;
     }
-
-    initialize_fitness();
 }
+
+
 
 void BIOBJ::search(const MCGRP &mcgrp)
 {
     // Initialize local search
-    HighSpeedNeighBorSearch local_search(mcgrp);
-    local_search.neigh_size = mcgrp.neigh_size;
-    local_search.policy.set(FIRST_ACCEPT | DOWNHILL | DELTA_ONLY);
+    HighSpeedNeighBorSearch ns(mcgrp);
+    ns.neigh_size = mcgrp.neigh_size;
+    ns.policy.set(FIRST_ACCEPT | DOWNHILL | DELTA_ONLY);
 
-    int idx = -1;
-    while(true){
-        idx = -1;
-        // select a member
-        for(int i = 0; i< members.size(); i++){
-            if(members[i].tried == false){
-                idx = i;
-                break;
-            }
-        }
+    int max_Iter = 100;
+    for(int iter = 0;iter < max_Iter;iter++){
+        int idx = select();
 
-        // no member can improve population
+        // no more member can improve population
         if(idx == -1){
-            break;
+            cout<<"no more member can be improved"<<endl;
+            return;
         }
 
         // try to get a new member
-        auto new_member = descent_search(members[idx].solution,local_search,mcgrp);
+        auto new_member = local_search(members[idx].solution, ns, mcgrp);
 
         if(!new_member.solution.empty()) {
             // update the population
-            try_to_replace(new_member);
+
+            update_population(new_member);
         }
         else{
             members[idx].tried = true;
         }
     }
+
 }
 
-BIOBJ::UNIT BIOBJ::descent_search(const vector<int>& sol, HighSpeedNeighBorSearch &local_search, const MCGRP &mcgrp)
+BIOBJ::UNIT BIOBJ::local_search(const vector<int>& sol, HighSpeedNeighBorSearch &ns, const MCGRP &mcgrp)
 {
-    local_search.clear();
-    local_search.unpack_seq(sol, mcgrp);
+    ns.clear();
+    ns.unpack_seq(sol, mcgrp);
 
     vector<NeighborOperator> neighbor_operator{
         NeighborOperator::SINGLE_INSERT,
@@ -126,11 +92,11 @@ BIOBJ::UNIT BIOBJ::descent_search(const vector<int>& sol, HighSpeedNeighBorSearc
     int chosen_task = -1;
     mcgrp._rng.RandPerm(neighbor_operator);
     for (auto cur_operator : neighbor_operator) {
-        mcgrp._rng.RandPerm(local_search.task_set);
+        mcgrp._rng.RandPerm(ns.task_set);
 
         for (int i = 0; i < mcgrp.actual_task_num; i++) {
-            chosen_task = local_search.task_set[i];
-            if (local_search.solution[chosen_task]->next == nullptr) {
+            chosen_task = ns.task_set[i];
+            if (ns.solution[chosen_task]->next == nullptr) {
                 if (mcgrp.is_edge(chosen_task)) {
                     chosen_task = mcgrp.inst_tasks[chosen_task].inverse;
                     My_Assert(local_search.solution[chosen_task]->next != nullptr,"An edge task has been missed");
@@ -142,39 +108,39 @@ BIOBJ::UNIT BIOBJ::descent_search(const vector<int>& sol, HighSpeedNeighBorSearc
 
             switch (cur_operator){
                 case SINGLE_INSERT:
-                    if(local_search.single_insert->bi_search(local_search, mcgrp, chosen_task)){
-                        auto solution = local_search.get_solution();
-                        auto objectives = pair<double,double>{local_search.get_cur_cost(),local_search.get_balance()};
+                    if(ns.single_insert->bi_search(ns, mcgrp, chosen_task)){
+                        auto solution = ns.get_solution();
+                        auto objectives = pair<double,double>{ns.get_cur_cost(), ns.get_balance()};
                         return UNIT(solution,objectives);
                     }
                     break;
                 case DOUBLE_INSERT:
-                    if(local_search.double_insert->bi_search(local_search, mcgrp, chosen_task)){
-                        auto solution = local_search.get_solution();
-                        auto objectives = pair<double,double>{local_search.get_cur_cost(),local_search.get_balance()};
+                    if(ns.double_insert->bi_search(ns, mcgrp, chosen_task)){
+                        auto solution = ns.get_solution();
+                        auto objectives = pair<double,double>{ns.get_cur_cost(), ns.get_balance()};
                         return UNIT(solution,objectives);
                     }
                     break;
                 case SWAP:
-                    if(local_search.swap->bi_search(local_search, mcgrp, chosen_task)){
-                        auto solution = local_search.get_solution();
-                        auto objectives = pair<double,double>{local_search.get_cur_cost(),local_search.get_balance()};
+                    if(ns.swap->bi_search(ns, mcgrp, chosen_task)){
+                        auto solution = ns.get_solution();
+                        auto objectives = pair<double,double>{ns.get_cur_cost(), ns.get_balance()};
                         return UNIT(solution,objectives);
                     }
                     break;
                 case INVERT:
                     if(mcgrp.req_edge_num != 0){
-                        if(local_search.invert->bi_search(local_search, mcgrp, chosen_task)){
-                            auto solution = local_search.get_solution();
-                            auto objectives = pair<double,double>{local_search.get_cur_cost(),local_search.get_balance()};
+                        if(ns.invert->bi_search(ns, mcgrp, chosen_task)){
+                            auto solution = ns.get_solution();
+                            auto objectives = pair<double,double>{ns.get_cur_cost(), ns.get_balance()};
                             return UNIT(solution,objectives);
                         }
                     }
                     break;
                 case TWO_OPT:
-                    if(local_search.two_opt->bi_search(local_search, mcgrp, chosen_task)){
-                        auto solution = local_search.get_solution();
-                        auto objectives = pair<double,double>{local_search.get_cur_cost(),local_search.get_balance()};
+                    if(ns.two_opt->bi_search(ns, mcgrp, chosen_task)){
+                        auto solution = ns.get_solution();
+                        auto objectives = pair<double,double>{ns.get_cur_cost(), ns.get_balance()};
                         return UNIT(solution,objectives);
                     }
                     break;
@@ -186,4 +152,20 @@ BIOBJ::UNIT BIOBJ::descent_search(const vector<int>& sol, HighSpeedNeighBorSearc
 
     vector<int> dump{};
     return UNIT(dump,{0,0});
+}
+
+int BIOBJ::select()
+{
+    auto rng = std::default_random_engine {};
+    std::shuffle(std::begin(member_ids), std::end(member_ids), rng);
+    int idx = -1;
+    // select a member
+    for(auto id : member_ids){
+        if(members[id].tried == false){
+            idx = id;
+            break;
+        }
+    }
+
+    return idx;
 }

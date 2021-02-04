@@ -94,7 +94,7 @@ struct MCGRPRoute
     int start = -1;
     int end = -1;
     int load = 0;
-    double length = 0;
+    int length = 0;
     int num_customers = 0;
 
     void clear(){
@@ -234,7 +234,6 @@ public:
     double delta;
 
     double new_total_route_length;
-    double new_balance;
     double vio_load_delta;
     vector<int> move_arguments;
 
@@ -291,7 +290,6 @@ public:
         vio_load_delta = 0;
         new_total_route_length =
             std::numeric_limits<identity<decltype(MCGRPMOVE::new_total_route_length)>::type>::max();
-        new_balance = 0;
         move_arguments.clear();
 
         num_affected_routes = -1;

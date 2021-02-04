@@ -3267,10 +3267,10 @@ bool HighSpeedNeighBorSearch::check_duplicated(const MCGRP &mcgrp)
     return true;
 }
 
-double HighSpeedNeighBorSearch::get_balance()
+int HighSpeedNeighBorSearch::get_balance()
 {
-    double longest = 0;
-    double shortest = DBL_MAX;
+    int longest = 0;
+    int shortest = DBL_MAX;
     for(auto id : routes.activated_route_id){
         longest = max(longest,routes[id]->length);
         shortest = min(shortest,routes[id]->length);

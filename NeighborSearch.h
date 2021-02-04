@@ -547,7 +547,7 @@ public:
     void threshold_exploration_version_0(const MCGRP &mcgrp);
     void threshold_exploration_version_1(const MCGRP &mcgrp);
 
-    double get_balance();
+    int get_balance();
 
     /*!
      * @details descent exploration

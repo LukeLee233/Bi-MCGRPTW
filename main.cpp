@@ -212,6 +212,7 @@ int main(int argc, char *argv[])
             /*----------------------------------------------------------*/
             cout << "Begin search..." << endl;
             biobj.init_population(Mixed_Instance);
+            biobj.initialize_fitness();
             for(auto &member : biobj.members){
                 cout<< member.objectives.first << " "<< member.objectives.second<<endl;
             }

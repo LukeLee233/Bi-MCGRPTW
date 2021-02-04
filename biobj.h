@@ -32,6 +32,7 @@ public:
 
     int upper_bound;
     vector<UNIT> members;
+    vector<int> member_ids;
     double min_o1 = DBL_MAX;
     double min_o2 = DBL_MAX;
 
@@ -53,61 +54,73 @@ public:
         max_o2 = max(max_o2,o2);
     }
 
-    void normalize(UNIT& unit){
+    void normalize(UNIT& unit) const{
         double normalized_o1 = (unit.objectives.first - min_o1) / (max_o1 - min_o1);
         double normalized_o2 = (unit.objectives.second - min_o2) / (max_o2 - min_o2);
         unit.normalized_objectives = {normalized_o1,normalized_o2};
     }
 
+    static double epsilon_I(const UNIT& m1,const UNIT& m2){
+        return max(m1.normalized_objectives.first - m2.normalized_objectives.first,
+                   m1.normalized_objectives.second - m2.normalized_objectives.second);
+    }
+
     void initialize_fitness(){
-        for(auto& member: members){
+
+        for(auto& member: members)
             normalize(member);
-        }
 
         for(int i = 0;i < members.size();i++) {
+
             members[i].fitness = 0;
             for (int j = 0; j < members.size(); j++) {
                 if (i == j) continue;
 
-                members[i].fitness += max(members[i].normalized_objectives.first - members[j].normalized_objectives.second,
-                                          members[i].normalized_objectives.first - members[j].normalized_objectives.second);
+                members[i].fitness += epsilon_I(members[j],members[i]);
             }
-
-            members[i].fitness;
         }
+
     }
 
-    bool try_to_replace(UNIT& unit){
+    bool update_population(UNIT& unit){
         update_bound(unit.objectives);
         normalize(unit);
 
+        for(auto member: members){
+            normalize(member);
+        }
+
+        // calculate fitness
         unit.fitness = 0;
         for(const auto & member : members){
-            unit.fitness += max(unit.normalized_objectives.first - member.normalized_objectives.first,
-                                unit.normalized_objectives.second - member.normalized_objectives.second);
+            unit.fitness += epsilon_I(member,unit);
         }
 
-        vector<pair<int,double>> new_fitness;
-        int idx = 0;
-        for(auto & member:members){
-            new_fitness.emplace_back(idx,member.fitness + max(member.normalized_objectives.first - unit.normalized_objectives.first,
-                                                              member.normalized_objectives.second - unit.normalized_objectives.second));
-
-            idx++;
+        pair<int,double> minimum_member{-1,DBL_MAX};
+        for(int i = 0; i< members.size();i++){
+            members[i].fitness += epsilon_I(unit,members[i]);
+            if(members[i].fitness < minimum_member.second){
+                minimum_member.first = i;
+                minimum_member.second = members[i].fitness;
+            }
         }
 
-        sort(new_fitness.begin(),new_fitness.end(),sortbysec);
-
-        if(unit.fitness > new_fitness[0].second){
-            for(auto & fitness: new_fitness){
-                members[fitness.first].fitness = fitness.second;
+        // preserve population
+        if(unit.fitness < minimum_member.second){
+            for(auto& member:members){
+                member.fitness -= epsilon_I(unit,member);
             }
 
-            members[new_fitness[0].first] = unit;
-            return true;
+            return false;
         }
         else{
-            return false;
+            unit.fitness -= epsilon_I(members[minimum_member.first],unit);
+            for(auto & member: members){
+                member.fitness -= epsilon_I(members[minimum_member.first],member);
+            }
+
+            members[minimum_member.first] = unit;
+            return true;
         }
 
     }
@@ -116,13 +129,19 @@ public:
 
     void init_population(const MCGRP &mcgrp);
 
-    static UNIT descent_search(const vector<int>& sol, HighSpeedNeighBorSearch& ns, const MCGRP &mcgrp);
+    static UNIT local_search(const vector<int>& sol, HighSpeedNeighBorSearch& ns, const MCGRP &mcgrp);
+
+    int select();
 
     void search(const MCGRP &mcgrp);
 
     explicit BIOBJ(int upperBound)
         : upper_bound(upperBound)
-    {}
+    {
+        for(int i = 0; i < upper_bound;i++){
+            member_ids.push_back(i);
+        }
+    }
 
 
     void clear(){
@@ -134,8 +153,6 @@ public:
         max_o2 = DBL_MIN;
     }
 };
-
-bool try_to_replace(BIOBJ& biobj, pair<double,double> new_objectives);
 
 
 #endif //BIOBJ_H

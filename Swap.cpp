@@ -3,9 +3,6 @@
 #include <vector>
 #include <algorithm>
 
-#include "biobj.h"
-
-extern class BIOBJ biobj;
 
 using namespace std;
 
@@ -3043,7 +3040,7 @@ bool NewSwap::bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcg
 
     }
 
-    vector<double> routes_length;
+    vector<int> routes_length;
     for(int route_id : ns.routes.activated_route_id){
         double route_length = ns.routes[route_id]->length;
         if(route_id == u_route){
@@ -3060,9 +3057,10 @@ bool NewSwap::bi_considerable_move(HighSpeedNeighBorSearch &ns, const MCGRP &mcg
 
     auto longest_route = max_element(std::begin(routes_length), std::end(routes_length));
     auto shortest_route = min_element(std::begin(routes_length), std::end(routes_length));
-    move_result.new_balance = *longest_route - *shortest_route;
+    int new_balance = *longest_route - *shortest_route;
+    int balance_delta = new_balance - ns.get_balance();
 
-    if(!try_to_replace(biobj,{ns.cur_solution_cost + delta, move_result.new_balance})){
+    if(delta >= 0 && balance_delta >= 0){
         move_result.reset();
         return false;
     }
