@@ -33,6 +33,14 @@ public:
     int upper_bound;
     vector<UNIT> members;
     vector<int> member_ids;
+    pair<double, double> reference_point{1.1,1.1};
+
+    double hyper_volume(const pair<double, double> &lb, const pair<double,double> & ru){
+        return (ru.first - lb.first) * (ru.second - lb.second);
+    }
+
+    double hyp_val(const UNIT& u1, const UNIT& u2);
+
     double min_o1 = DBL_MAX;
     double min_o2 = DBL_MAX;
 
@@ -60,11 +68,6 @@ public:
         unit.normalized_objectives = {normalized_o1,normalized_o2};
     }
 
-    static double epsilon_I(const UNIT& m1,const UNIT& m2){
-        return max(m1.normalized_objectives.first - m2.normalized_objectives.first,
-                   m1.normalized_objectives.second - m2.normalized_objectives.second);
-    }
-
     void initialize_fitness(){
 
         for(auto& member: members)
@@ -76,7 +79,7 @@ public:
             for (int j = 0; j < members.size(); j++) {
                 if (i == j) continue;
 
-                members[i].fitness += epsilon_I(members[j],members[i]);
+                members[i].fitness += hyp_val(members[j],members[i]);
             }
         }
 
@@ -93,12 +96,12 @@ public:
         // calculate fitness
         unit.fitness = 0;
         for(const auto & member : members){
-            unit.fitness += epsilon_I(member,unit);
+            unit.fitness += hyp_val(member,unit);
         }
 
         pair<int,double> minimum_member{-1,DBL_MAX};
         for(int i = 0; i< members.size();i++){
-            members[i].fitness += epsilon_I(unit,members[i]);
+            members[i].fitness += hyp_val(unit,members[i]);
             if(members[i].fitness < minimum_member.second){
                 minimum_member.first = i;
                 minimum_member.second = members[i].fitness;
@@ -108,15 +111,15 @@ public:
         // preserve population
         if(unit.fitness < minimum_member.second){
             for(auto& member:members){
-                member.fitness -= epsilon_I(unit,member);
+                member.fitness -= hyp_val(unit,member);
             }
 
             return false;
         }
         else{
-            unit.fitness -= epsilon_I(members[minimum_member.first],unit);
+            unit.fitness -= hyp_val(members[minimum_member.first],unit);
             for(auto & member: members){
-                member.fitness -= epsilon_I(members[minimum_member.first],member);
+                member.fitness -= hyp_val(members[minimum_member.first],member);
             }
 
             members[minimum_member.first] = unit;

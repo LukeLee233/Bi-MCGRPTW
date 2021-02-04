@@ -51,7 +51,7 @@ void BIOBJ::search(const MCGRP &mcgrp)
     ns.neigh_size = mcgrp.neigh_size;
     ns.policy.set(FIRST_ACCEPT | DOWNHILL | DELTA_ONLY);
 
-    int max_Iter = 100;
+    int max_Iter = 10000;
     for(int iter = 0;iter < max_Iter;iter++){
         int idx = select();
 
@@ -168,4 +168,43 @@ int BIOBJ::select()
     }
 
     return idx;
+}
+
+double BIOBJ::hyp_val(const BIOBJ::UNIT &u1, const BIOBJ::UNIT &u2)
+{
+    int dominated = -2;
+    if(u1.normalized_objectives.first <= u2.normalized_objectives.first
+    && u1.normalized_objectives.second <= u2.normalized_objectives.second)
+    {
+        dominated = 1;
+    }
+    else if(u1.normalized_objectives.first >= u2.normalized_objectives.first
+    && u1.normalized_objectives.second >= u2.normalized_objectives.second)
+    {
+        dominated = -1;
+    }
+    else
+        {
+        dominated = 0;
+    }
+
+    double val = 0;
+    if(dominated == 0){
+        pair<double, double> corner_point{u1.normalized_objectives.first,u2.normalized_objectives.second};
+        pair<double, double> intra_point{u2.normalized_objectives.first,u1.normalized_objectives.second};
+
+        if(corner_point.first > intra_point.first && corner_point.second > intra_point.second){
+            swap(corner_point,intra_point);
+        }
+
+        double volume_u1_2 = hyper_volume(corner_point,reference_point) - hyper_volume(corner_point,intra_point);
+
+        val = volume_u1_2 - hyper_volume(u1.normalized_objectives,reference_point);
+
+    }else{
+        val = hyper_volume(u2.normalized_objectives,reference_point) - hyper_volume(u1.normalized_objectives,reference_point);
+    }
+
+
+    return val;
 }
