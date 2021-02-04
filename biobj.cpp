@@ -51,7 +51,7 @@ void BIOBJ::search(const MCGRP &mcgrp)
     ns.neigh_size = mcgrp.neigh_size;
     ns.policy.set(FIRST_ACCEPT | DOWNHILL | DELTA_ONLY);
 
-    int max_Iter = 100;
+    int max_Iter = 10000;
     for(int iter = 0;iter < max_Iter;iter++){
         int idx = select();
 
