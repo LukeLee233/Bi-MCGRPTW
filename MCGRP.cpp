@@ -842,3 +842,61 @@ bool MCGRP::valid_sol(const vector<int> &neg_seq, const double sol_cost)
 
     return valid_length == sol_cost;
 }
+
+void MCGRP::print_solution(const vector<int>& sol) const
+{
+    vector<vector<int>> routes;
+    vector<int> buf;
+    bool first_flag = true;
+    for(const auto i : sol){
+        if(i < 0){
+            if(!routes.empty() || !first_flag){
+                buf.push_back(0);
+                routes.push_back(buf);
+                buf.clear();
+            }
+
+            first_flag = false;
+            buf.push_back(0);
+            buf.push_back(-i);
+        }
+        else{
+            buf.push_back(i);
+        }
+    }
+
+    if(!buf.empty()){
+        buf.push_back(0);
+        routes.push_back(buf);
+    }
+
+
+    for(const auto& route : routes){
+        print_routes(route);
+        cout<<endl;
+    }
+
+}
+
+void MCGRP::print_routes(const vector<int> &route) const{
+    for(int idx = 0; idx < route.size();idx++) {
+
+        cout << '[';
+        if (inst_tasks[route[idx]].head_node == inst_tasks[route[idx]].tail_node) {
+            cout << inst_tasks[route[idx]].head_node;
+        }
+        else {
+            cout << inst_tasks[route[idx]].head_node << "->" << inst_tasks[route[idx]].tail_node;
+        }
+        cout << ']';
+
+
+        if (idx < route.size() - 1) {
+            cout << "->";
+            const auto &path = shortest_path[inst_tasks[route[idx]].tail_node][inst_tasks[route[idx + 1]].tail_node];
+            for (int ii = 1; ii + 1 < path.size(); ii++) {
+                cout << path[ii] << "->";
+            }
+        }
+    }
+}

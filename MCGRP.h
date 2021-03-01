@@ -157,5 +157,9 @@ public:
 
     /* validate solution */
     bool valid_sol(const std::vector<int> &neg_seq, const double sol_cost);
+
+    void print_solution(const vector<int>& sol) const;
+    void print_routes(const vector<int>& route) const;
+
 };
 
