@@ -893,7 +893,7 @@ void MCGRP::print_routes(const vector<int> &route) const{
 
         if (idx < route.size() - 1) {
             cout << "->";
-            const auto &path = shortest_path[inst_tasks[route[idx]].tail_node][inst_tasks[route[idx + 1]].tail_node];
+            const auto &path = shortest_path[inst_tasks[route[idx]].tail_node][inst_tasks[route[idx + 1]].head_node];
             for (int ii = 1; ii + 1 < path.size(); ii++) {
                 cout << path[ii] << "->";
             }
