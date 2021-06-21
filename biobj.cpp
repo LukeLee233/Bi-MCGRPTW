@@ -62,7 +62,7 @@ void BIOBJ::search(const MCGRP &mcgrp)
         }
 
         // try to get a new member
-        auto new_member = local_search(members[idx].solution, ns, mcgrp);
+        auto new_member = local_search(members[idx % members.size()].solution, ns, mcgrp);
 
         if(!new_member.solution.empty()) {
             // update the population
